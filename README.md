@@ -94,12 +94,19 @@ moves lives in the statusline, where its cost is measured separately.
 ## The keyboard
 
 Every binding lives on `cmd` or `cmd+shift`, leaving `ctrl` and `alt` chords
-free for the shell and for Claude Code. `cmd+/` opens the cheatsheet as an
-overlay, generated from `kitty.conf` itself so there is no second file to
-drift.
+free for the shell and for Claude Code. `cmd+/` opens the cheatsheet, and it is
+**generated from `kitty.conf` itself** — every row you read sits beside the
+`map` line that creates it, so the two cannot drift apart.
 
-![The cmd+/ overlay: tabs, panes, scrollback and screen grabbing, each row
-next to the binding that produces it](docs/media/02-keys.png)
+It is written for someone who has never seen this setup. Six sections, each
+opening with what it is *for*, and the keys whose behaviour you could not guess
+carry a second line saying **how** they work rather than only what they do: why
+`cmd+alt+d` splits 2/3 instead of in half, why `cmd+shift+up` does nothing
+until `cmd+shift+m` is on, what `cmd+alt+g` gives you that `cmd+shift+g` never
+can. A legend at the top says what the colours mean.
+
+![The cmd+/ cheatsheet: six sections, each with a purpose line, keys in amber
+with what they do beside them and how they work underneath](docs/media/02-keys.png)
 
 Five worth calling out for Claude Code work:
 

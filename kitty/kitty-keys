@@ -43,11 +43,29 @@ CAT_ROWS = (' /\\___/\\ ', '(  o.o  )', ' >  ^  < ', '  U    U ')
 
 
 def parse(path):
-    """[(name, [(key, desc) | ('', prose)])], from the #| grammar."""
+    """[(name, rows)] from the #| grammar in kitty.conf.
+
+    Four row kinds, so a newcomer gets more than a verb:
+
+        #|= NAME          section heading
+        #|~ prose         one-line "what this section is for", under the rule
+        #|  key   desc    a binding and what it does
+        #|> detail        HOW the binding works, indented under it; repeatable
+        #|  prose         a free paragraph
+        #|                blank
+
+    The detail rows are the point: "cmd+alt+g  pager for the command cmd+up
+    last jumped to" says what, and the line under it says why that differs from
+    cmd+shift+g. Nobody can infer that from a key name.
+    """
     sections = []
     for line in open(path, encoding='utf-8'):
         if line.startswith('#|='):
             sections.append((line[3:].strip(), []))
+        elif line.startswith('#|~') and sections:
+            sections[-1][1].append(('~', line[3:].strip()))
+        elif line.startswith('#|>') and sections:
+            sections[-1][1].append(('>', line[3:].strip()))
         elif line.startswith('#|') and sections:
             row = line[2:].rstrip()
             if row.startswith('  '):
@@ -62,6 +80,19 @@ def parse(path):
                 sections[-1][1].append((key, desc))
             else:
                 sections[-1][1].append(('', row.strip()))
+    # A sentence written across several #|~ or #|> lines is ONE paragraph.
+    # Wrapping each source line separately orphaned its tail on a line of its
+    # own ("...between the lines / that") and gave every subtitle line its own
+    # blank, double-spacing the section intros.
+    for _, rows in sections:
+        i = 0
+        while i < len(rows) - 1:
+            k, d = rows[i]
+            if k in ('~', '>') and rows[i + 1][0] == k:
+                rows[i] = (k, f"{d} {rows[i + 1][1]}".strip())
+                del rows[i + 1]
+            else:
+                i += 1
     return sections
 
 
@@ -79,14 +110,22 @@ def wrap(text, width):
 
 
 def render_section(name, rows, width):
-    """One section as a list of exactly-`width` display lines."""
+    """One section as a list of at-most-`width` display lines."""
     out = []
-    rule = '─' * max(0, width - len(name) - 4)
-    out.append(f'{HEAD}{name}{R} {RULE}──{R} {RULE}{rule}{R}',)
-    out.append('')
-    keyw = max([len(k) for k, d in rows if k] or [0])
+    rule = '─' * max(0, width - len(name) - 5)
+    out.append(f'{ACC}▍{R}{HEAD}{name}{R} {RULE}{rule}{R}')
+    keyw = max([len(k) for k, d in rows if k and k not in ('~', '>')] or [0])
     keyw = min(keyw, 20)
     for key, desc in rows:
+        if key == '~':                                # section subtitle
+            for ln in wrap(desc, width - 2):
+                out.append(f'  {DIM}{ln}{R}')
+            out.append('')
+            continue
+        if key == '>':                                # how it works
+            for ln in wrap(desc, max(20, width - keyw - 4)):
+                out.append(f'  {"":<{keyw}}  {DIM}{ln}{R}')
+            continue
         if not key and not desc:
             out.append('')
             continue
@@ -138,6 +177,9 @@ def main():
     out.append(f'{pad}{DIM}{CAT_ROWS[2]}{R}')
     out.append(f'{pad}{DIM}{CAT_ROWS[3]}{R}')
     out.append(f'{pad}{RULE}{"─" * (cols - 4)}{R}')
+    out.append(f'{pad}{KEY}amber{R}{DIM} the key  ·  {R}{DESC}parchment{R}'
+               f'{DIM} what it does  ·  dim  how it works  ·  '
+               f'"· default" means kitty binds it, not this config{R}')
     out.append('')
 
     if two_col:
