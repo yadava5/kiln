@@ -1,8 +1,8 @@
 # Change plan — 2026-08-22
 
-**Outcome:** items 2, 4, 5, 6, 7 and 8 are APPLIED and verified. Item 1 stays
-DEFERRED (needs a kitty quit). Item 3 is NOT DONE — the mechanism it assumed
-does not work as written; see the note at the foot of this file.
+**Outcome:** items 2 through 8 are APPLIED and verified. Item 1 stays DEFERRED
+(needs a kitty quit). Item 3 took three attempts and a corrected mechanism —
+the postscript at the foot of this file is the useful part.
 
 Eight items were proposed. **#1 is deferred**: kitty 0.48.2 needs a full quit and
 Ayush is working in a live tab. Everything below is edit-only. Nothing here
@@ -133,7 +133,7 @@ layout is what makes that upgrade cheap.
 
 ---
 
-## Item 3 postscript — why it is not done
+## Item 3 postscript — how it was actually done
 
 `disallowedTools` does **not** accept individual MCP tool names. The entry
 `mcp__supabase__execute_sql` is valid YAML, looks correct, and is silently
@@ -148,10 +148,19 @@ spawned stig reported its own tool access as
 with every Supabase tool absent from its registry. A later spawn, after the
 entry had been removed and re-added, saw them present again.
 
-So the config in `claude/agents/stig.md` is the documented correct form, but
-**propagation within a running session is unreliable**, and it must be
-re-verified from a fresh Claude Code session before being treated as enforced.
-Until then, assume stig can still reach both Supabase servers.
+**It is now in effect and verified.** A later spawn reported its own roster
+line as `Tools: All tools except Write, Edit, NotebookEdit, mcp__supabase,
+mcp__supabase-applied`, `ToolSearch` for either `execute_sql` returned
+`No matching deferred tools found`, and the Chrome control returned both
+schemas — so stig lost exactly the two database servers and nothing else.
+
+The lesson is propagation, not syntax: the same file content read as
+unenforced for a stretch and then took hold. **Do not conclude from one spawn
+that an agent-file change has failed.** Re-check before rewriting anything.
+
+The prose rule under Hard limits stays as well. The frontmatter deny is the
+belt; the written rule is the braces, and it holds even when a spawn picks up
+a stale definition.
 
 Two things learned that are worth more than the item itself:
 

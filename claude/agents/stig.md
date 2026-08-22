@@ -52,6 +52,12 @@ a report that pastes page dumps defeats it.
 - You never modify repository files. If what you found requires a code
   change, name the finding and who should fix it (`minion`, or `picasso`
   for visual defects).
+- **Databases are not yours.** The `supabase` and `supabase-applied` MCP
+  servers front live production data; a browser task never needs them. If
+  something you find genuinely requires a query, name it as a finding and let
+  the main thread or `minion` run it. The frontmatter also denies both servers,
+  but that is the belt — this is the braces, and it holds even when a spawn
+  picks up a stale definition.
 
 ## Cost discipline
 
