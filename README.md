@@ -160,6 +160,46 @@ ligature](docs/media/04-check-art.png)
 
 ---
 
+## The activity dashboard
+
+`cmd+shift+a` opens an overlay showing what the machine and the agents are
+actually doing. `q` closes it.
+
+![The activity dashboard: CPU, memory, battery and network; the live Claude
+Code sessions with their working directory and resident size; and the running
+subagents with model, elapsed time and token counts](docs/media/09-activity.png)
+
+It costs nothing until it is open, which is why it is a key rather than a pane
+— the same reason the terminal itself has no idle repaints.
+
+Every number is sampled from a real source, and the cheap way was measured
+rather than assumed:
+
+| Row | Source |
+| --- | --- |
+| cpu | `host_statistics(HOST_CPU_LOAD_INFO)` via `ctypes` — the same tick counters `top` differences, 0.8 ms a sample |
+| mem | `vm_stat` pages: active + wired + compressed against `hw.memsize` |
+| net | `netstat -ib` totals, differenced between frames |
+| sessions | `~/.claude/sessions/*.json`, which the CLI maintains, joined to `ps` for CPU and RSS |
+| agents | `~/.claude/projects/*/*/subagents/agent-*.jsonl` — mtime is the liveness signal, model and tokens come from the last record carrying them |
+| gauges | `~/.claude/cache/ratelimits` and `fablelimit`, the same files the statusline reads |
+
+`ps -A -o %cpu` was tried first for CPU and read **8.2%** when the true figure
+was **15.1%**, because macOS reports a decaying per-process average. `top -l 1`
+is accurate but costs 390 ms, which is a fifth of a two second tick. The tick
+counters are both accurate and free.
+
+Agent transcripts reach megabytes, so only the tail is read and a parse is
+cached against size and mtime; a finished agent is never re-read.
+
+**The glyphs were shaped before they shipped.** `check-art` says the vertical
+ramp `▁▂▃▄▅▆▇█`, the eighths ramp `▏▎▍▌▋▊▉█` and the box drawing are all one
+glyph per cell in JetBrains Mono. Braille is **not in the font at all** — it
+renders as tofu — and neither are the statusline's own `▰▱` gauge blocks, which
+kitty silently falls back to another face to draw. Nothing here uses either.
+
+---
+
 ## Agents and hooks
 
 ![Agent routing: six agents in two tiers, and the PreToolUse hook that
@@ -243,6 +283,9 @@ kitty/check-art '  /\_/\ ' ' ( o.o ) ' ' =^.^= '
 # Every cat this setup can draw, at real size, in your own terminal.
 kitty/kitty-cats
 
+# One frame of the activity dashboard, no alt-screen — pipeable.
+kitty/kiln-top --once
+
 # Drift between this repo and the config actually installed.
 tools/check-sync.sh
 
@@ -295,6 +338,7 @@ kitty/
   themes/kiln.conf      the palette
   tab_bar.py            custom draw_tab, DORMANT (needs tab_bar_style custom)
   kitty-keys            cmd+/ overlay, generated from kitty.conf
+  kiln-top              activity dashboard: machine, sessions, agents (cmd+shift+a)
   kitty-cats            every cat this setup can draw, at real size
   kitty-theme           live palette switch over the control socket
   check-art             HarfBuzz shaping gate for terminal art
