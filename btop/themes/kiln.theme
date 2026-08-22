@@ -1,0 +1,66 @@
+# kiln — btop theme matching the kitty palette in ~/.config/kitty/themes/kiln.conf
+#
+# Every colour here is lifted from that file rather than picked by eye, so the
+# monitor and the terminal it runs in are the same palette. Gradients run
+# cool -> ember -> terracotta, which is the same "fine / warm / hot" ladder the
+# statusline gauges and kiln-top use, so a red bar means the same thing
+# everywhere.
+#
+# main_bg is EMPTY on purpose: that makes btop transparent to kitty's own
+# background, so the Oxford topography stays visible behind it. Setting it to
+# #17120f would paint a flat plate over the image.
+
+theme[main_bg]=""
+theme[main_fg]="#f0e5d1"
+theme[title]="#efa84e"
+theme[hi_fg]="#d8624e"
+theme[selected_bg]="#534439"
+theme[selected_fg]="#ffffff"
+theme[inactive_fg]="#7a5432"
+theme[graph_text]="#bcb3ad"
+theme[meter_bg]="#2a211b"
+theme[proc_misc]="#68bdab"
+
+# Boxes
+theme[cpu_box]="#7a5432"
+theme[mem_box]="#7a5432"
+theme[net_box]="#7a5432"
+theme[proc_box]="#7a5432"
+theme[div_line]="#534439"
+
+# CPU load: teal -> ember -> terracotta
+theme[cpu_start]="#68bdab"
+theme[cpu_mid]="#efa84e"
+theme[cpu_end]="#d8624e"
+
+# Temperature
+theme[temp_start]="#7da6d9"
+theme[temp_mid]="#efa84e"
+theme[temp_end]="#d8624e"
+
+# Per-process
+theme[process_start]="#a4cb6f"
+theme[process_mid]="#efa84e"
+theme[process_end]="#d8624e"
+
+# Memory: used climbs toward terracotta, free stays green, cached teal
+theme[used_start]="#a4cb6f"
+theme[used_mid]="#efa84e"
+theme[used_end]="#d8624e"
+theme[free_start]="#3f6b34"
+theme[free_mid]="#6f9c52"
+theme[free_end]="#a4cb6f"
+theme[cached_start]="#3b6f66"
+theme[cached_mid]="#4f9587"
+theme[cached_end]="#68bdab"
+theme[available_start]="#4a6a86"
+theme[available_mid]="#63879f"
+theme[available_end]="#7da6d9"
+
+# Network
+theme[download_start]="#4a6a86"
+theme[download_mid]="#63879f"
+theme[download_end]="#7da6d9"
+theme[upload_start]="#8a5a72"
+theme[upload_mid]="#a86e96"
+theme[upload_end]="#c782ba"

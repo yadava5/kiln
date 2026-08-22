@@ -1,549 +1,391 @@
 #!/usr/bin/env python3
 """kiln-top — what this machine and these agents are actually doing.
 
-    ~/.config/kitty/kiln-top          2s refresh
-    ~/.config/kitty/kiln-top -i 1     faster
-    ~/.config/kitty/kiln-top --once   one frame, no alt-screen (for piping)
+    ~/.config/kitty/kiln-top          100 ms, full screen
+    ~/.config/kitty/kiln-top -i 0.5   slower
+    ~/.config/kitty/kiln-top --once   one frame, no alt-screen (pipeable)
 
-q or ctrl-c quits.
+q or ctrl-c quits. Opened from kitty with cmd+shift+a, which gives it its OWN
+TAB, never an overlay — an overlay covers the pane it opens over, and this
+exists to be watched while Claude works. See kiln-top-open.
 
-ON-DEMAND BY DESIGN. kitty.conf's performance section is explicit that this
-setup has no idle repaints, and the statusline cat is already paying ~21 ms per
-render per open session. A dashboard that ran all the time would be a second
-standing cost for something you look at for ten seconds. This costs exactly
-nothing until you open it.
+WHY THIS EXISTS RATHER THAN btop. btop is excellent and is themed for this
+palette in ~/.config/btop/themes/kiln.theme; use it for deep process work. It
+cannot show the half of this machine that matters here: Claude Code sessions,
+running subagents, plan limits, and tokens per minute. Nor GPU on macOS. This
+puts the machine and the agents on ONE screen, which is the only place the
+question "is that spike me or the agent" can be answered.
 
-EVERY NUMBER HERE IS SAMPLED, NOT ESTIMATED, and the cheap way was measured
-rather than assumed:
+HOW 100 ms IS AFFORDABLE — measured, not assumed. Costs live in kiln-sample.py.
+CPU, per-core, and memory come from Mach calls through ctypes at 0.0 ms, so
+they run EVERY frame. Everything needing a fork is far dearer (ps 28 ms,
+ioreg 18 ms, netstat 12 ms) and runs on its own phase; the phases are co-prime
+so they seldom collide. Token history is incremental — a full transcript scan
+was 188 ms, so each file's byte offset is remembered and only appended bytes
+are read, which is 8 ms. The true per-frame peak is printed in the header, so
+if this ever stops being cheap the screen says so rather than this docstring.
 
-  CPU        host_statistics(HOST_CPU_LOAD_INFO) via ctypes — the same tick
-             counters top itself differences. 0.8 ms a sample. `ps -A -o %cpu`
-             was tried first and read 8.2% when the true figure was 15.1%,
-             because macOS %cpu is a decaying per-process average. `top -l 1`
-             is accurate but costs 390 ms, which is 20% of a 2 s tick.
-  memory     vm_stat pages: active + wired + compressed against hw.memsize.
-  agents     ~/.claude/projects/*/*/subagents/agent-*.jsonl. mtime is the
-             liveness signal; model and token usage come from the last record
-             carrying them. Files reach megabytes, so only the tail is read.
-  limits     ~/.claude/cache/ratelimits and fablelimit — the same files the
-             statusline reads, written from Claude Code's own payload. Never
-             recomputed here.
-
-GLYPHS ARE SHAPED, NOT GUESSED. Every character below went through
-`check-art` against the live font first. The vertical ramp, the horizontal
-ramp and the box drawing are all one glyph per cell. Braille is NOT in
-JetBrainsMono at all (it renders as tofu), and neither are the statusline's
-own gauge blocks; that is why nothing here uses them.
+GLYPHS ARE SHAPED, NOT GUESSED: every character passed check-art against the
+live font. Braille is NOT in JetBrainsMono (it renders through a fallback face,
+which is why btop's braille graphs look like scattered dots here) and neither
+are the statusline's own gauge blocks. Nothing here uses either.
 """
-import ctypes
-import ctypes.util
 import glob
+import importlib.util
 import json
 import os
-import subprocess
+import re
 import sys
 import termios
 import time
 import tty
 
-# ── kiln palette ────────────────────────────────────────────────────────────
-R = "\033[0m"
-def fg(h):
-    return f"\033[38;2;{int(h[0:2],16)};{int(h[2:4],16)};{int(h[4:6],16)}m"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_sp = importlib.util.spec_from_file_location(
+    "kiln_sample", os.path.join(_HERE, "kiln-sample.py"))
+S = importlib.util.module_from_spec(_sp)
+_sp.loader.exec_module(S)
 
+R, B = "\033[0m", "\033[1m"
+def fg(h): return f"\033[38;2;{int(h[0:2],16)};{int(h[2:4],16)};{int(h[4:6],16)}m"
 FG, DIM, EMBER = fg("f0e5d1"), fg("9a8f84"), fg("efa84e")
-CLAY, TERRA, GREEN, BLUE = fg("7a5432"), fg("d8624e"), fg("a4cb6f"), fg("7da6d9")
-B = "\033[1m"
+CLAY, TERRA, GREEN = fg("7a5432"), fg("d8624e"), fg("a4cb6f")
+BLUE, CYAN, VIOLET = fg("7da6d9"), fg("68bdab"), fg("c782ba")
 
-RAMP = " ▁▂▃▄▅▆▇█"        # CLEAN, 9 cells
-BAR  = "▏▎▍▌▋▊▉█"          # CLEAN, 8 cells
-
+RAMP, BARS = " ▁▂▃▄▅▆▇█", "▏▎▍▌▋▊▉█"
+SGR = re.compile(r"\033\[[0-9;]*m")
 HOME = os.path.expanduser("~")
 CACHE = os.path.join(HOME, ".claude", "cache")
-SESSIONS = os.path.join(HOME, ".claude", "sessions")
-PROJECTS = os.path.join(HOME, ".claude", "projects")
 
-# ── samplers ────────────────────────────────────────────────────────────────
-_libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
-_CPU_STATES = 4
+vlen = lambda s: len(SGR.sub("", s))
+def pad(s, w): return s + " " * max(0, w - vlen(s))
 
+def human(n, u=""):
+    for s, d in (("T", 1 << 40), ("G", 1 << 30), ("M", 1 << 20), ("K", 1 << 10)):
+        if n >= d: return f"{n/d:.1f}{s}{u}"
+    return f"{int(n)}{u}"
 
-class _CpuLoad(ctypes.Structure):
-    _fields_ = [("cpu_ticks", ctypes.c_uint * _CPU_STATES)]
+def kilo(n):
+    if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+    if n >= 1000: return f"{n/1000:.1f}k"
+    return str(int(n))
 
+def dur(x):
+    x = int(max(0, x))
+    if x >= 86400: return f"{x//86400}d{(x%86400)//3600:02d}h"
+    if x >= 3600:  return f"{x//3600}h{(x%3600)//60:02d}m"
+    if x >= 60:    return f"{x//60}m{x%60:02d}s"
+    return f"{x}s"
 
-def cpu_ticks():
-    """user, system, idle, nice — aggregate across all cores."""
-    count = ctypes.c_uint(_CPU_STATES)
-    info = _CpuLoad()
-    if _libc.host_statistics(_libc.mach_host_self(), 3,
-                             ctypes.byref(info), ctypes.byref(count)) != 0:
-        return None
-    return list(info.cpu_ticks)
+def heat(p): return GREEN if p < 50 else EMBER if p < 80 else TERRA
 
+def spark(h, w, scale=None):
+    """Missing samples are blank; a measured zero is a floor mark.
 
-def sysctl(name, numeric=True):
-    try:
-        out = subprocess.run(["/usr/sbin/sysctl", "-n", name],
-                             capture_output=True, text=True, timeout=2).stdout.strip()
-        return int(out) if numeric else out
-    except Exception:
-        return 0 if numeric else ""
+    RAMP[0] is a space, so drawing a real 0 with it made an idle series
+    invisible — the 10-core row rendered as nothing at all. Values clamp to
+    index 1 (▁) so "measured, and it was zero" reads differently from
+    "no sample yet".
+    """
+    v = list(h)[-w:]
+    top = scale or (max(v) if v else 1) or 1
+    return " " * (w - len(v)) + "".join(
+        RAMP[max(1, int(max(0.0, min(1.0, x / top)) * 8 + 0.5))] for x in v)
 
+def gauge(p, w, c=None):
+    if p < 0: return DIM + "─" * w + R
+    f = max(0.0, min(100.0, p)) / 100.0 * w
+    n = int(f)
+    s = "█" * n + (BARS[min(7, int((f - n) * 8))] if n < w and f - n > .06 else "")
+    return (c or heat(p)) + pad(s, w) + R
 
-def memory():
-    """(used_bytes, total_bytes). Used = active + wired + compressed, which is
-    what macOS itself counts as unavailable; free + inactive is reclaimable."""
-    total = sysctl("hw.memsize")
-    try:
-        out = subprocess.run(["/usr/bin/vm_stat"], capture_output=True,
-                             text=True, timeout=2).stdout
-    except Exception:
-        return 0, total
-    page = 4096
-    vals = {}
-    for line in out.splitlines():
-        if "page size of" in line:
-            for tok in line.split():
-                if tok.isdigit():
-                    page = int(tok)
-        if ":" in line:
-            k, _, v = line.partition(":")
-            v = v.strip().rstrip(".")
-            if v.isdigit():
-                vals[k.strip()] = int(v)
-    used = sum(vals.get(k, 0) for k in
-               ("Pages active", "Pages wired down", "Pages occupied by compressor"))
-    return used * page, total
-
-
-def swap_used():
-    s = sysctl("vm.swapusage", numeric=False)
-    try:
-        used = s.split("used =")[1].split()[0]
-        return float(used.rstrip("M")) * 1024 * 1024
-    except Exception:
-        return 0
-
-
-def battery():
-    try:
-        out = subprocess.run(["/usr/bin/pmset", "-g", "batt"],
-                             capture_output=True, text=True, timeout=2).stdout
-    except Exception:
-        return None, ""
-    pct, state = None, ""
-    for tok in out.replace(";", " ").split():
-        if tok.endswith("%") and tok[:-1].isdigit():
-            pct = int(tok[:-1])
-    low = out.lower()
-    if "ac attached" in low or "charging" in low:
-        state = "charging" if "; charging" in low else "AC"
-    else:
-        state = "battery"
-    return pct, state
-
-
-def net_bytes():
-    """(rx, tx) totals across real interfaces."""
-    try:
-        out = subprocess.run(["/usr/sbin/netstat", "-ib"], capture_output=True,
-                             text=True, timeout=2).stdout
-    except Exception:
-        return 0, 0
-    rx = tx = 0
-    seen = set()
-    for line in out.splitlines()[1:]:
-        f = line.split()
-        if len(f) < 11 or f[0] in seen or f[0].startswith("lo"):
-            continue
-        try:
-            rx += int(f[6]); tx += int(f[9]); seen.add(f[0])
-        except (ValueError, IndexError):
-            continue
-    return rx, tx
-
-
-def disk_free(path="/"):
-    try:
-        st = os.statvfs(path)
-        return st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize
-    except Exception:
-        return 0, 0
-
+def rule(t, w, c=EMBER):
+    return f"{c}{B}{t}{R}  {CLAY}" + "─" * max(0, w - len(t) - 4) + R
 
 def limits():
-    """(five_pct, five_reset, week_pct, week_reset, fable_pct, fable_reset)."""
-    five = week = -1
-    five_r = week_r = 0
+    five = week = fab = -1; fr = wr = br = 0
     try:
-        with open(os.path.join(CACHE, "ratelimits")) as f:
-            p = f.read().split()
-        five, five_r, week, week_r = int(p[0]), int(p[1]), int(p[2]), int(p[3])
-    except Exception:
-        pass
-    fab, fab_r = -1, 0
+        p = open(os.path.join(CACHE, "ratelimits")).read().split()
+        five, fr, week, wr = int(p[0]), int(p[1]), int(p[2]), int(p[3])
+    except Exception: pass
     try:
-        with open(os.path.join(CACHE, "fablelimit")) as f:
-            p = f.read().split("\t")
-        fab, fab_r = int(p[1]), int(p[2])
-    except Exception:
-        pass
-    return five, five_r, week, week_r, fab, fab_r
+        p = open(os.path.join(CACHE, "fablelimit")).read().split("\t")
+        fab, br = int(p[1]), int(p[2])
+    except Exception: pass
+    return five, fr, week, wr, fab, br
 
-
-def ps_map():
-    """pid -> (%cpu, rss_bytes) for everything, one fork."""
-    out = {}
-    try:
-        r = subprocess.run(["/bin/ps", "-A", "-o", "pid=,%cpu=,rss="],
-                           capture_output=True, text=True, timeout=3).stdout
-    except Exception:
-        return out
-    for line in r.splitlines():
-        f = line.split()
-        if len(f) == 3:
-            try:
-                out[int(f[0])] = (float(f[1]), int(f[2]) * 1024)
-            except ValueError:
-                pass
-    return out
-
-
-def sessions(psm):
-    """Live Claude Code sessions, from the files the CLI itself maintains."""
+def sessions(pmap):
     rows = []
-    for path in glob.glob(os.path.join(SESSIONS, "*.json")):
-        try:
-            with open(path) as f:
-                d = json.load(f)
-        except Exception:
-            continue
+    for path in glob.glob(os.path.join(HOME, ".claude", "sessions", "*.json")):
+        try: d = json.load(open(path))
+        except Exception: continue
         pid = d.get("pid")
-        if not isinstance(pid, int) or pid not in psm:
-            continue            # the file outlives the process; skip the dead
-        started = d.get("startedAt") or 0
-        rows.append({
-            "name": d.get("name") or "?",
-            "cwd": os.path.basename(d.get("cwd") or "") or "/",
-            "status": d.get("status") or "?",
-            "age": time.time() - started / 1000 if started > 1e12 else 0,
-            "cpu": psm[pid][0], "rss": psm[pid][1], "pid": pid,
-        })
-    rows.sort(key=lambda r: -r["rss"])
-    return rows
+        if not isinstance(pid, int) or pid not in pmap: continue
+        st = d.get("startedAt") or 0
+        rows.append({"name": d.get("name") or "?",
+                     "cwd": os.path.basename(d.get("cwd") or "") or "/",
+                     "status": d.get("status") or "?",
+                     "age": time.time() - st / 1000 if st > 1e12 else 0,
+                     "cpu": pmap[pid][0], "rss": pmap[pid][1]})
+    rows.sort(key=lambda r: -r["rss"]); return rows
 
-
-_agent_cache = {}
-
-
-def agents(limit=7):
-    """Subagents across every project, newest first.
-
-    The transcripts reach megabytes, so the tail is read rather than the file,
-    and a parse is cached against (size, mtime) — a finished agent is never
-    re-read."""
+_ac = {}
+def agents(limit=14):
     rows = []
-    for path in glob.glob(os.path.join(PROJECTS, "*", "*", "subagents", "agent-*.jsonl")):
-        try:
-            st = os.stat(path)
-        except OSError:
-            continue
-        if time.time() - st.st_mtime > 3600:
-            continue
-        key = (path, st.st_size, int(st.st_mtime))
-        hit = _agent_cache.get(key)
-        if hit is None:
-            hit = _parse_agent(path, st.st_size)
-            _agent_cache[key] = hit
-        rows.append({**hit, "mtime": st.st_mtime, "size": st.st_size,
-                     "id": os.path.basename(path)[6:-6]})
-    rows.sort(key=lambda r: -r["mtime"])
-    return rows[:limit]
+    for path in glob.glob(os.path.join(HOME, ".claude", "projects",
+                                       "*", "*", "subagents", "agent-*.jsonl")):
+        try: st = os.stat(path)
+        except OSError: continue
+        if time.time() - st.st_mtime > 3600: continue
+        k = (path, st.st_size, int(st.st_mtime))
+        hit = _ac.get(k) or _parse(path, st.st_size)
+        _ac[k] = hit
+        rows.append({**hit, "mtime": st.st_mtime, "id": os.path.basename(path)[6:-6]})
+    rows.sort(key=lambda r: -r["mtime"]); return rows[:limit]
 
-
-def _parse_agent(path, size):
-    """model + last usage + first timestamp, from head and tail only."""
-    model, tok_in, tok_out, started = "", 0, 0, None
+def _parse(path, size):
+    model, tin, tout, started = "", 0, 0, None
     try:
         with open(path, "rb") as f:
             first = f.readline().decode("utf-8", "replace")
-            if size > 262144:
-                f.seek(-262144, os.SEEK_END)
-                f.readline()          # discard the partial line
+            if size > 262144: f.seek(-262144, os.SEEK_END); f.readline()
             tail = f.read().decode("utf-8", "replace")
     except Exception:
         return {"model": "", "tin": 0, "tout": 0, "started": None}
-    try:
-        started = json.loads(first).get("timestamp")
-    except Exception:
-        pass
+    try: started = json.loads(first).get("timestamp")
+    except Exception: pass
     for line in tail.splitlines():
-        if '"usage"' not in line and '"model"' not in line:
-            continue
-        try:
-            d = json.loads(line)
-        except Exception:
-            continue
-        m = d.get("message")
-        if not isinstance(m, dict):
-            continue
-        if m.get("model"):
-            model = m["model"]
+        if '"usage"' not in line and '"model"' not in line: continue
+        try: m = json.loads(line).get("message") or {}
+        except Exception: continue
+        if not isinstance(m, dict): continue
+        if m.get("model"): model = m["model"]
         u = m.get("usage")
         if isinstance(u, dict):
-            tok_in = (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
-                      + u.get("cache_creation_input_tokens", 0))
-            tok_out = u.get("output_tokens", 0)
-    return {"model": model, "tin": tok_in, "tout": tok_out, "started": started}
+            tin = (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
+                   + u.get("cache_creation_input_tokens", 0))
+            tout = u.get("output_tokens", 0)
+    return {"model": model, "tin": tin, "tout": tout, "started": started}
 
+def collect(st):
+    t0 = time.perf_counter(); n = st["n"] = st.get("n", 0) + 1
+    t = S.cpu_ticks()
+    if t and st.get("_t"):
+        d = [b - a for a, b in zip(st["_t"], t)]; tot = sum(d)
+        if tot:
+            st["cpu"] = 100.0 * (tot - d[2]) / tot
+            st["u"] = 100.0 * (d[0] + d[3]) / tot; st["s"] = 100.0 * d[1] / tot
+    st["_t"] = t
+    st["cpu_h"].append(st["cpu"]); del st["cpu_h"][:-300]
+    # PER-CORE NEEDS A LONGER BASELINE THAN ONE FRAME. The tick counters run at
+    # 100 Hz, so in 100 ms a single core accrues 0 or 1 ticks and every core
+    # rounds to 0% — the row rendered a flat line of zeros while the aggregate
+    # correctly showed 12%, because the aggregate sums ten cores and has ten
+    # times the resolution. Each frame is therefore differenced against a
+    # reference roughly a second old, which is kept rolling.
+    c = S.per_core_ticks()
+    now_t = time.perf_counter()
+    st.setdefault("_ch", []).append((now_t, c))
+    st["_ch"] = [(t, v) for t, v in st["_ch"] if now_t - t <= 2.0][-40:]
+    ref = next((v for t, v in st["_ch"] if now_t - t >= 0.8), None)
+    if c and ref and len(c) == len(ref):
+        out = []
+        for a, b in zip(ref, c):
+            d = [y - x for x, y in zip(a, b)]; tt = sum(d)
+            out.append(100.0 * (tt - d[2]) / tt if tt else 0.0)
+        st["cores"] = out
+    st["mem"] = S.memory()
+    st["mem_h"].append(100.0 * st["mem"][0] / st["mem"][1] if st["mem"][1] else 0)
+    del st["mem_h"][:-300]
+    # ONE FORK PER FRAME, EVER. Phased modulo scheduling looked fine on paper
+    # and then produced 81 ms frames: with periods 3/7/13 there are frames
+    # where gpu (19 ms) + processes (26 ms) + net (12 ms) all come due at once.
+    # Instead every heavy sampler declares how stale it may get, and each frame
+    # runs AT MOST the single most-overdue one. Worst-case frame cost is now
+    # the dearest single sampler rather than the sum of all of them, and
+    # nothing goes stale by more than its own budget plus a frame or two.
+    now_w = time.time()
+    due = None
+    for name, budget in (("procs", 1.0), ("gpu", 0.4), ("net", 2.0),
+                         ("tok", 3.0), ("slow", 20.0)):
+        age = now_w - st["last"].get(name, 0)
+        if age >= budget and (due is None or age / budget > due[1]):
+            due = (name, age / budget)
+    if due:
+        name = due[0]
+        st["last"][name] = now_w
+        if name == "procs":
+            st["procs"] = S.processes()
+            st["pmap"] = {p[0]: (p[1], p[2]) for p in st["procs"]}
+            st["sessions"] = sessions(st["pmap"])
+        elif name == "gpu":
+            g = S.gpu()
+            if g:
+                st["gpu"] = g
+                st["gpu_h"].append(g[0]); del st["gpu_h"][:-300]
+        elif name == "net":
+            rx, tx = S.net_bytes()
+            dt = max(.001, now_w - st.get("_nt", now_w - 1))
+            if st.get("_rx"):
+                st["rx"] = max(0, (rx - st["_rx"]) / dt)
+                st["tx"] = max(0, (tx - st["_tx"]) / dt)
+            st["_rx"], st["_tx"], st["_nt"] = rx, tx, now_w
+            st["limits"] = limits()
+        elif name == "tok":
+            st["tok"] = S.token_minutes(); st["agents"] = agents()
+        elif name == "slow":
+            st["batt"] = S.battery(); st["swap"] = S.swap_used()
+            st["disk"] = S.disk_free()
+    st["load"] = " ".join(f"{x:.2f}" for x in os.getloadavg())
+    st["ch"].append((time.perf_counter() - t0) * 1000); del st["ch"][:-60]
+    # The first frames fire every phase at once; reporting their cost forever
+    # would describe a burst that never recurs. Peak over the recent window,
+    # after the warm-up frames.
+    recent = st["ch"][-40:] if len(st["ch"]) > 6 else st["ch"]
+    st["cost"] = max(recent) if recent else 0.0
+    st["avg"] = sum(recent) / len(recent) if recent else 0.0
+    return st
 
-# ── formatting ──────────────────────────────────────────────────────────────
-def human(n, unit=""):
-    for s, d in (("T", 1 << 40), ("G", 1 << 30), ("M", 1 << 20), ("K", 1 << 10)):
-        if n >= d:
-            return f"{n/d:.1f}{s}{unit}"
-    return f"{int(n)}{unit}"
-
-
-def kilo(n):
-    if n >= 1_000_000:
-        return f"{n/1_000_000:.1f}M"
-    if n >= 1000:
-        return f"{n/1000:.0f}k"
-    return str(int(n))
-
-
-def dur(sec):
-    sec = int(max(0, sec))
-    if sec >= 86400:
-        return f"{sec//86400}d{(sec % 86400)//3600:02d}h"
-    if sec >= 3600:
-        return f"{sec//3600}h{(sec % 3600)//60:02d}m"
-    if sec >= 60:
-        return f"{sec//60}m{sec % 60:02d}s"
-    return f"{sec}s"
-
-
-def spark(hist, width):
-    """Vertical ramp over the last `width` samples, scaled 0..100."""
-    vals = list(hist)[-width:]
-    if not vals:
-        return ""
-    pad = " " * (width - len(vals))
-    out = []
-    for v in vals:
-        i = int(max(0.0, min(100.0, v)) / 100.0 * (len(RAMP) - 1) + 0.5)
-        out.append(RAMP[i])
-    return pad + "".join(out)
-
-
-def gauge(pct, width=10, colour=None):
-    """Horizontal fill. Sub-cell precision from the eighths ramp."""
-    if pct < 0:
-        return DIM + "─" * width + R
-    filled = max(0.0, min(100.0, pct)) / 100.0 * width
-    whole = int(filled)
-    rest = filled - whole
-    s = "█" * whole
-    if whole < width and rest > 1 / 16:
-        s += BAR[min(len(BAR) - 1, int(rest * 8))]
-    s = s.ljust(width, " ")
-    c = colour or (GREEN if pct < 50 else EMBER if pct < 80 else TERRA)
-    return c + s + R
-
-
-def heat(pct):
-    return GREEN if pct < 50 else EMBER if pct < 80 else TERRA
-
-
-def rule(title, width):
-    """Section header the same shape kitty-keys uses: name, then a rule.
-
-    An earlier version drew boxes with ╭╮╰╯ and no side walls, so every panel
-    read as unclosed. Closing them properly would mean measuring the visible
-    width of lines that are mostly SGR escapes; matching the cheatsheet is both
-    simpler and more consistent with the rest of this setup."""
-    return (f"{EMBER}{B}{title}{R}  {CLAY}"
-            + "─" * max(0, width - len(title) - 4) + R)
-
-
-def endrule(width):
-    return ""
-
-
-# ── frame ───────────────────────────────────────────────────────────────────
-def frame(state, width):
-    W = max(64, min(width, 110))
+def frame(st, W, H):
     L = []
-    inner = W - 4
-
-    # MACHINE
-    L.append(rule("MACHINE", W))
-    c = state["cpu"]
-    L.append(f"  {DIM}cpu {R}{heat(c)}{c:5.1f}%{R} {spark(state['cpu_h'], 34)}"
-             f"  {DIM}load{R} {state['load']}")
-    used, total = state["mem"]
+    used, total, wired, active, comp, cached = st["mem"]
     mp = 100.0 * used / total if total else 0
-    L.append(f"  {DIM}mem {R}{heat(mp)}{mp:5.1f}%{R} {gauge(mp, 12)} "
-             f"{DIM}{human(used)}/{human(total)}{R}"
-             + (f"  {DIM}swap {human(state['swap'])}{R}" if state["swap"] else ""))
-    bp, bs = state["batt"]
-    free, dtot = state["disk"]
-    bits = []
-    if bp is not None:
-        bits.append(f"{DIM}batt{R} {heat(100-bp)}{bp}%{R} {DIM}{bs}{R}")
-    bits.append(f"{DIM}disk{R} {human(free)} {DIM}free{R}")
-    bits.append(f"{DIM}net{R} {BLUE}↓{R}{human(state['rx'],'/s')} {BLUE}↑{R}{human(state['tx'],'/s')}")
-    L.append("  " + f"  {DIM}·{R}  ".join(bits))
-    L.append(endrule(W))
-
-    # CLAUDE
-    L.append(rule("CLAUDE", W))
-    f5, f5r, wk, wkr, fb, fbr = state["limits"]
-    now = time.time()
-    def until(ts):
-        return f" {DIM}·{R} {DIM}{dur(ts-now)}{R}" if ts > now else ""
-    L.append(f"  {DIM}5h {R}{gauge(f5, 10)} {heat(f5)}{f5:3d}%{R}{until(f5r)}"
-             f"   {DIM}wk {R}{gauge(wk, 10)} {heat(wk)}{wk:3d}%{R}{until(wkr)}")
+    cpu = st["cpu"]; g = st.get("gpu")
+    # Peak alone overstates it: most frames run no fork at all and cost ~0 ms,
+    # while the one frame a second that re-reads the process table costs ~44.
+    # Both numbers, so neither flatters nor alarms.
+    hdr = (f"{DIM}q quits · {int(st['interval']*1000)} ms · "
+           f"{st.get('avg',0):.1f} ms avg, {st['cost']:.0f} peak"
+           f" · {time.strftime('%H:%M:%S')}{R}")
+    L.append(pad(f" {EMBER}{B}kiln{R} {DIM}·{R} {FG}activity{R}", W - vlen(hdr) - 1) + hdr)
+    L.append("")
+    sw = max(18, min(52, W - 66))
+    L.append(f" {DIM}CPU{R} {heat(cpu)}{B}{cpu:5.1f}%{R} {heat(cpu)}{spark(st['cpu_h'],sw,100)}{R}"
+             f"  {DIM}user{R} {st['u']:4.1f} {DIM}sys{R} {st['s']:4.1f}  {DIM}load{R} {st['load']}")
+    if st.get("cores"):
+        cs = " ".join(heat(c) + RAMP[max(1, int(min(100, c) / 100 * 8 + .5))] + R
+                      for c in st["cores"])
+        L.append(f" {DIM}{len(st['cores']):>3} cores{R} {cs}   "
+                 f"{DIM}busiest{R} {max(st['cores']):.0f}%  {DIM}idlest{R} {min(st['cores']):.0f}%")
+    if g:
+        gu, gr, gt, vin, val = g
+        L.append(f" {DIM}GPU{R} {heat(gu)}{B}{gu:5.1f}%{R} {heat(gu)}{spark(st['gpu_h'],sw,100)}{R}"
+                 f"  {DIM}render{R} {gr:>3}% {DIM}tiler{R} {gt:>3}%  {DIM}vram{R} {human(vin)}{DIM}/{human(val)}{R}")
+    L.append(f" {DIM}MEM{R} {heat(mp)}{B}{mp:5.1f}%{R} {heat(mp)}{spark(st['mem_h'],sw,100)}{R}"
+             f"  {DIM}{human(used)}/{human(total)}   wired{R} {human(wired)} {DIM}active{R} {human(active)}"
+             f" {DIM}comp{R} {human(comp)} {DIM}cached{R} {human(cached)}")
+    bp, bs = st["batt"]; free, _ = st["disk"]
+    L.append(f"     {DIM}swap{R} {human(st['swap'])}"
+             + (f"  {DIM}·  batt{R} {heat(100-(bp or 0))}{bp}%{R} {DIM}{bs}{R}" if bp else "")
+             + f"  {DIM}·  disk{R} {human(free)} {DIM}free  ·  net{R} "
+               f"{BLUE}↓{R}{human(st['rx'],'/s')} {BLUE}↑{R}{human(st['tx'],'/s')}")
+    L.append("")
+    lw = max(36, int(W * 0.44)); rw = W - lw - 3
+    left, right = [], []
+    procs = st.get("procs") or []
+    # Fill the window. The header block is ~7 rows and each panel costs a rule
+    # plus a blank; whatever is left is split between the process table and the
+    # session/agent lists rather than left as dead space.
+    body = max(6, H - len(L) - 2)
+    nproc = max(5, min(26, body - 2))
+    nagent = max(3, min(10, body - 14))
+    nsess = max(3, min(10, body - nagent - 10))
+    left.append(rule("WHERE IT GOES", lw))
+    half = lw // 2
+    left.append(pad(f" {DIM}by cpu{R}", half) + f"{DIM}by memory{R}")
+    bc = sorted(procs, key=lambda p: -p[1])[:nproc]
+    bm = sorted(procs, key=lambda p: -p[2])[:nproc]
+    for i in range(nproc):
+        a = (f" {heat(min(100,bc[i][1]))}{bc[i][1]:5.1f}{R} {FG}{bc[i][3][:13]:13}{R}"
+             if i < len(bc) else "")
+        b = (f"{CYAN}{human(bm[i][2]):>6}{R} {FG}{bm[i][3][:13]:13}{R}"
+             if i < len(bm) else "")
+        left.append(pad(a, half) + b)
+    right.append(rule("TOKENS", rw))
+    tok = st.get("tok") or {}
+    now_m = int(time.time() // 60)
+    # Width must allow for everything printed AFTER the sparkline — " out/min ",
+    # the rate, the peak and the total. Sizing it at rw-34 overflowed the
+    # column and the wrapped remainder surfaced inside the left panel.
+    span = max(20, min(90, rw - 54))
+    series = [tok.get(now_m - i, 0) for i in range(span - 1, -1, -1)]
+    peak = max(series) if series else 0
+    tw = span
+    right.append(f" {DIM}out/min{R} {VIOLET}{spark(series, tw)}{R}"
+                 f"  {FG}{kilo(series[-1] if series else 0)}{R}{DIM}/min"
+                 f"  peak {kilo(peak)}  {span}m {kilo(sum(series))}{R}")
+    f5, f5r, wk, wkr, fb, fbr = st["limits"]; now = time.time()
+    u = lambda ts: f" {DIM}{dur(ts-now)}{R}" if ts > now else ""
+    right.append(f" {DIM}5h{R} {gauge(f5,10)} {heat(f5)}{f5:3d}%{R}{u(f5r)}"
+                 f"   {DIM}wk{R} {gauge(wk,10)} {heat(wk)}{wk:3d}%{R}{u(wkr)}")
     if fb >= 0:
-        L.append(f"  {DIM}fable{R} {gauge(fb, 10)} {heat(fb)}{fb:3d}%{R}{until(fbr)}")
-    for s in state["sessions"][:5]:
-        dot = GREEN + "●" + R if s["status"] == "busy" else DIM + "○" + R
-        L.append(f"  {dot} {FG}{s['name'][:16]:16}{R} {DIM}{s['cwd'][:18]:18}{R}"
-                 f" {DIM}{dur(s['age']):>7}{R} {DIM}cpu{R} {s['cpu']:4.1f} "
-                 f"{DIM}{human(s['rss']):>6}{R}")
-    if not state["sessions"]:
-        L.append(f"  {DIM}no live sessions{R}")
-    L.append(endrule(W))
-
-    # AGENTS
-    L.append(rule("AGENTS", W))
-    if not state["agents"]:
-        L.append(f"  {DIM}no agent activity in the last hour{R}")
-    for a in state["agents"]:
+        right.append(f" {DIM}fable{R} {gauge(fb,10)} {heat(fb)}{fb:3d}%{R}{u(fbr)}")
+    right.append("")
+    right.append(rule("AGENTS", rw))
+    if not st["agents"]: right.append(f" {DIM}no agent activity in the last hour{R}")
+    for a in st["agents"][:nagent]:
         live = now - a["mtime"] < 45
         dot = (GREEN + "●" + R) if live else (DIM + "○" + R)
-        model = (a["model"] or "?").replace("claude-", "").replace("-20250929", "")
+        model = (a["model"] or "?").replace("claude-", "")
         el = ""
         if a["started"]:
             try:
                 t0 = time.mktime(time.strptime(a["started"][:19], "%Y-%m-%dT%H:%M:%S"))
-                t0 -= time.timezone if not time.daylight else time.altzone
+                t0 -= time.altzone if time.daylight else time.timezone
                 el = dur(a["mtime"] - t0)
-            except Exception:
-                el = ""
-        age = dur(now - a["mtime"])
-        L.append(f"  {dot} {FG}{a['id'][:12]:12}{R} {EMBER}{model[:10]:10}{R}"
-                 f" {DIM}{el:>7}{R} {DIM}ctx{R} {kilo(a['tin']):>6}"
-                 f" {DIM}out{R} {kilo(a['tout']):>5}"
-                 f" {DIM}{human(a['size']):>6} {'live' if live else age:>6}{R}")
-    L.append(endrule(W))
-    L.append(f"  {DIM}q quits · sampled every {state['interval']}s · "
-             f"cpu via host_statistics, {state['cost']:.0f} ms/frame{R}")
-    return "\n".join(x for x in L if x != "")
+            except Exception: pass
+        right.append(f" {dot} {FG}{a['id'][:12]:12}{R} {EMBER}{model[:9]:9}{R}"
+                     f" {DIM}{el:>7} ctx{R} {kilo(a['tin']):>6} {DIM}out{R} {kilo(a['tout']):>5}"
+                     f" {DIM}{'live' if live else dur(now-a['mtime']):>6}{R}")
+    right.append("")
+    right.append(rule("CLAUDE SESSIONS", rw, CLAY))
+    for ss in st["sessions"][:nsess]:
+        dot = GREEN + "●" + R if ss["status"] == "busy" else DIM + "○" + R
+        right.append(f" {dot} {FG}{ss['name'][:16]:16}{R} {DIM}{ss['cwd'][:16]:16}"
+                     f" {dur(ss['age']):>6} cpu{R} {ss['cpu']:5.1f} {DIM}{human(ss['rss']):>7}{R}")
+    if not st["sessions"]:
+        right.append(f" {DIM}no live sessions{R}")
+    for i in range(max(len(left), len(right))):
+        L.append(pad(left[i] if i < len(left) else "", lw + 2)
+                 + (right[i] if i < len(right) else ""))
+    return "\n".join(L[:H])
 
-
-def collect(state):
-    t0 = time.time()
-    ticks = cpu_ticks()
-    if ticks and state.get("_ticks"):
-        d = [b - a for a, b in zip(state["_ticks"], ticks)]
-        tot = sum(d)
-        state["cpu"] = 100.0 * (tot - d[2]) / tot if tot else 0.0
-    state["_ticks"] = ticks
-    state["cpu_h"].append(state["cpu"])
-    if len(state["cpu_h"]) > 120:
-        del state["cpu_h"][:-120]
-
-    state["mem"] = memory()
-    # Slow movers: battery, swap and free space do not change meaningfully on a
-    # 2 s timescale, and each is a fork. Sampling them every tenth frame took
-    # the frame cost from ~62 ms to ~25 ms with no visible difference.
-    state["_slow"] = state.get("_slow", 0) + 1
-    if state["_slow"] % 10 == 1:
-        state["swap"] = swap_used()
-        state["batt"] = battery()
-        state["disk"] = disk_free()
-    la = os.getloadavg()
-    state["load"] = " ".join(f"{x:.2f}" for x in la)
-
-    rx, tx = net_bytes()
-    dt = max(0.001, time.time() - state.get("_nt", time.time() - 1))
-    if state.get("_rx"):
-        state["rx"] = max(0, (rx - state["_rx"]) / dt)
-        state["tx"] = max(0, (tx - state["_tx"]) / dt)
-    state["_rx"], state["_tx"], state["_nt"] = rx, tx, time.time()
-
-    state["limits"] = limits()
-    psm = ps_map()
-    state["sessions"] = sessions(psm)
-    state["agents"] = agents()
-    state["cost"] = (time.time() - t0) * 1000
-    return state
-
-
-def term_width(default=100):
-    """os.get_terminal_size() raises OSError when stdout is not a tty — which
-    is exactly what happens under `kiln-top > file` or in a pipeline. It was
-    called unguarded in the redraw loop and crashed the whole tool on frame 1."""
+def term_size():
     try:
-        return os.get_terminal_size().columns
+        s = os.get_terminal_size(); return s.columns, s.lines
     except OSError:
-        try:
-            return int(os.environ.get("COLUMNS", default))
-        except ValueError:
-            return default
-
+        return int(os.environ.get("COLUMNS", 200)), int(os.environ.get("LINES", 50))
 
 def main():
-    argv = sys.argv[1:]
-    once = "--once" in argv
-    interval = 2.0
-    if "-i" in argv:
-        try:
-            interval = max(0.5, float(argv[argv.index("-i") + 1]))
-        except (ValueError, IndexError):
-            pass
-
-    state = {"cpu": 0.0, "cpu_h": [], "rx": 0, "tx": 0, "interval": interval,
-             "cost": 0.0, "load": "", "sessions": [], "agents": [],
-             "limits": (-1, 0, -1, 0, -1, 0), "mem": (0, 1), "swap": 0,
-             "batt": (None, ""), "disk": (0, 0)}
-    width = term_width()
-
+    a = sys.argv[1:]; once = "--once" in a; iv = 0.1
+    if "-i" in a:
+        try: iv = max(.05, float(a[a.index("-i") + 1]))
+        except (ValueError, IndexError): pass
+    st = {"cpu": 0., "u": 0., "s": 0., "cpu_h": [], "mem_h": [], "gpu_h": [], "ch": [],
+          "rx": 0, "tx": 0, "interval": iv, "cost": 0., "load": "", "sessions": [],
+          "agents": [], "procs": [], "pmap": {}, "limits": (-1, 0, -1, 0, -1, 0),
+          "mem": (0, 1, 0, 0, 0, 0), "swap": 0, "batt": (None, ""), "disk": (0, 0),
+          "cores": [], "tok": {}, "last": {}}
     if once:
-        collect(state)
-        time.sleep(0.25)
-        print(frame(collect(state), width))
-        return
-
+        for _ in range(9): collect(st); time.sleep(.05)
+        w, h = term_size(); print(frame(st, w, h)); return
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd) if sys.stdin.isatty() else None
     try:
-        if old:
-            tty.setcbreak(fd)
-        sys.stdout.write("\033[?1049h\033[?25l")     # alt screen, hide cursor
-        collect(state)
+        if old: tty.setcbreak(fd)
+        sys.stdout.write("\033[?1049h\033[?25l"); collect(st)
         while True:
-            width = term_width()
-            sys.stdout.write("\033[H\033[2J" + frame(collect(state), width) + "\n")
-            sys.stdout.flush()
+            w, h = term_size()
+            sys.stdout.write("\033[H\033[2J" + frame(collect(st), w, h)); sys.stdout.flush()
             if old:
                 import select
-                r, _, _ = select.select([fd], [], [], interval)
-                if r and sys.stdin.read(1) in ("q", "Q", "\x03"):
-                    break
-            else:
-                time.sleep(interval)
-    except KeyboardInterrupt:
-        pass
+                r, _, _ = select.select([fd], [], [], iv)
+                if r and sys.stdin.read(1) in ("q", "Q", "\x03"): break
+            else: time.sleep(iv)
+    except KeyboardInterrupt: pass
     finally:
-        sys.stdout.write("\033[?25h\033[?1049l")     # cursor back, main screen
-        sys.stdout.flush()
-        if old:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
+        sys.stdout.write("\033[?25h\033[?1049l"); sys.stdout.flush()
+        if old: termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 if __name__ == "__main__":
     main()

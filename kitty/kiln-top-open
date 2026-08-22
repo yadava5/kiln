@@ -1,31 +1,39 @@
 #!/bin/zsh
-# Open the activity dashboard in its OWN kitty tab, or focus it if already open.
+# Open a monitor in its OWN kitty tab, or focus it if already open.
 #
-# WHY NOT AN OVERLAY. cmd+shift+a used `launch --type=overlay`, which layers the
-# dashboard over the CURRENT pane. Measured 2026-08-22 against a staged kitty
-# running a full-screen TUI: the overlay covers the pane completely — the TUI is
-# still alive underneath and keeps redrawing, but it is invisible and untypeable
-# until the overlay closes. Doing that to a live Claude Code pane is exactly
-# backwards for a thing whose job is to watch Claude work.
+#   kiln-top-open              the kiln activity dashboard  (cmd+shift+a)
+#   kiln-top-open btop         btop, kiln-themed            (cmd+shift+u)
 #
-# A tab costs nothing, sits beside the work instead of on top of it, and is
-# reachable by cmd+number like everything else.
+# WHY NOT AN OVERLAY. cmd+shift+a first used `launch --type=overlay`, which
+# layers over the CURRENT pane. Measured 2026-08-22 against a staged kitty
+# running a full-screen TUI: the overlay covered the pane completely — the TUI
+# kept running underneath and its redraw counter kept advancing, but it was
+# invisible and untypeable until the overlay closed. Doing that to a live
+# Claude Code pane is backwards for a tool whose job is watching Claude work.
+# In a tab the same test left all three panes intact and the TUI redrew cleanly
+# on return, counter unbroken 37 -> 208.
 #
 # Launched with --type=background so this script has no window of its own; it
-# decides whether a tab is needed and asks kitty to make one. Remote control
-# comes from --allow-remote-control on the launch, the same pattern cmd+shift+b
-# already uses for the broadcast kitten.
+# decides whether a tab is needed and asks kitty for one. Remote control comes
+# from --allow-remote-control on the launch, the pattern cmd+shift+b already
+# uses for the broadcast kitten.
 emulate -L zsh
 setopt no_unset pipefail
 
+case "${1:-kiln}" in
+  btop) title=btop; cmd=(/opt/homebrew/bin/btop) ;;
+  *)    title=activity; cmd=("${0:A:h}/kiln-top") ;;
+esac
+
 sock="${KITTY_LISTEN_ON:-}"
-[[ -z "$sock" ]] && exec "${0:A:h}/kiln-top"
+[[ -z "$sock" ]] && exec "${cmd[@]}"
 
-kitten @ --to "$sock" ls 2>/dev/null > /tmp/.kiln-top-ls.$$ || {
-  rm -f /tmp/.kiln-top-ls.$$; exec "${0:A:h}/kiln-top"
-}
+tmp=$(/usr/bin/mktemp) || exec "${cmd[@]}"
+if ! kitten @ --to "$sock" ls > "$tmp" 2>/dev/null; then
+  /bin/rm -f "$tmp"; exec "${cmd[@]}"
+fi
 
-existing=$(/usr/bin/python3 - "/tmp/.kiln-top-ls.$$" <<'PY'
+existing=$(/usr/bin/python3 - "$tmp" "$title" <<'PY'
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
@@ -34,15 +42,15 @@ except Exception:
 for w in d:
     for t in w.get("tabs", []):
         for win in t.get("windows", []):
-            if (win.get("title") or "") == "activity":
+            if (win.get("title") or "") == sys.argv[2]:
                 print(win["id"]); sys.exit(0)
 PY
 )
-rm -f /tmp/.kiln-top-ls.$$
+/bin/rm -f "$tmp"
 
 if [[ -n "$existing" ]]; then
   kitten @ --to "$sock" focus-window --match "id:$existing" >/dev/null 2>&1
 else
-  kitten @ --to "$sock" launch --type=tab --tab-title activity \
-      --title activity "${0:A:h}/kiln-top" >/dev/null 2>&1
+  kitten @ --to "$sock" launch --type=tab --tab-title "$title" \
+      --title "$title" "${cmd[@]}" >/dev/null 2>&1
 fi

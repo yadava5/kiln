@@ -52,6 +52,7 @@ for f in "$SRC"/kitty/themes/* "$SRC"/kitty/backgrounds/*; do
   sub=$(basename "$(dirname "$f")")
   cmp_one "$f" "$KITTY/$sub/$(basename "$f")"
 done
+cmp_one "$SRC/btop/themes/kiln.theme"   "$HOME/.config/btop/themes/kiln.theme"
 cmp_one "$SRC/claude/statusline.sh"      "$CLAUDE/statusline.sh"
 cmp_one "$SRC/claude/statusline-demo.sh" "$CLAUDE/statusline-demo.sh"
 cmp_one "$SRC/claude/stage-preview.py"    "$CLAUDE/stage-preview.py"

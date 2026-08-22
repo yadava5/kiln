@@ -172,51 +172,87 @@ ligature](docs/media/04-check-art.png)
 
 ## The activity dashboard
 
-`cmd+shift+a` opens the dashboard **in its own kitty tab**. `q` closes it,
-and pressing the key again focuses the existing tab rather than opening a
-second one.
+`cmd+shift+a` opens it **in its own kitty tab** — never an overlay, because an
+overlay covers the pane it opens over and this exists to be watched *while*
+Claude works. Pressing the key again focuses the tab rather than opening a
+second one. `q` closes it. `cmd+shift+u` opens btop in the same way for deep
+process work.
 
-![The activity dashboard: CPU, memory, battery and network; the live Claude
-Code sessions with their working directory and resident size; and the running
-subagents with model, elapsed time and token counts](docs/media/09-activity.png)
+![The dashboard: CPU with per-core bars, GPU, memory breakdown, the process
+table by CPU and by memory, tokens per minute, plan gauges, running agents and
+live Claude sessions](docs/media/09-activity.png)
 
-It costs nothing until it is open, which is why it is a key rather than a
-resident pane — the same reason the terminal itself has no idle repaints.
+**A tab, not an overlay, and that was measured.** Driven against a staged kitty
+running a full-screen TUI, the overlay covered the pane completely: the TUI kept
+running underneath and its redraw counter kept advancing, but it was invisible
+and untypeable until the overlay closed. In a tab the same test left all three
+panes intact and the TUI redrew cleanly on return, counter unbroken 37 to 208.
 
-**A tab, not an overlay, and that was measured.** The first version used
-`--type=overlay`, like the `cmd+/` cheatsheet. Driven against a staged kitty
-running a full-screen TUI, the overlay covered the pane completely: the TUI
-kept running underneath and its redraw counter kept advancing, but it was
-invisible and untypeable until the overlay closed. Doing that to a live Claude
-Code pane is backwards for a tool whose whole job is watching Claude work. In a
-tab the same test left all three panes intact and the TUI redrew cleanly on
-return, its counter unbroken from 37 to 208.
+### Why not just btop
 
-Every number is sampled from a real source, and the cheap way was measured
-rather than assumed:
+btop is excellent, is already installed, and is themed to this palette in
+`btop/themes/kiln.theme` — `cmd+shift+u`. It cannot show the half of this
+machine that matters here: Claude Code sessions, running subagents, plan
+limits, and tokens per minute. Nor GPU on macOS. Putting the machine and the
+agents on one screen is the only way to answer "is that spike me or the agent".
 
-| Row | Source |
-| --- | --- |
-| cpu | `host_statistics(HOST_CPU_LOAD_INFO)` via `ctypes` — the same tick counters `top` differences, 0.8 ms a sample |
-| mem | `vm_stat` pages: active + wired + compressed against `hw.memsize` |
-| net | `netstat -ib` totals, differenced between frames |
-| sessions | `~/.claude/sessions/*.json`, which the CLI maintains, joined to `ps` for CPU and RSS |
-| agents | `~/.claude/projects/*/*/subagents/agent-*.jsonl` — mtime is the liveness signal, model and tokens come from the last record carrying them |
-| gauges | `~/.claude/cache/ratelimits` and `fablelimit`, the same files the statusline reads |
+![btop in the kiln palette](docs/media/10-btop.png)
 
-`ps -A -o %cpu` was tried first for CPU and read **8.2%** when the true figure
-was **15.1%**, because macOS reports a decaying per-process average. `top -l 1`
-is accurate but costs 390 ms, which is a fifth of a two second tick. The tick
-counters are both accurate and free.
+Its theme sets `main_bg` empty on purpose, so btop stays transparent to kitty's
+background and the topography shows through. `graph_symbol` is `block`, not the
+default `braille`: **braille is not in JetBrains Mono at all**, so kitty renders
+it through a fallback face and the graphs come out as scattered dots. Block
+glyphs are in the font and read as solid bars.
 
-Agent transcripts reach megabytes, so only the tail is read and a parse is
-cached against size and mtime; a finished agent is never re-read.
+### How 100 ms is affordable
+
+Every sampler's cost was measured, not assumed. The table lives in
+`kitty/kiln-sample.py`, which owns every source:
+
+| Source | Cost | Used for |
+| --- | --- | --- |
+| `host_statistics` (ctypes) | 0.0 ms | CPU ticks — every frame |
+| `host_statistics64` (ctypes) | 0.0 ms | memory: wired / active / compressed / cached — every frame |
+| `host_processor_info` (ctypes) | 0.0 ms | per-core ticks — every frame |
+| `ps -A -o …,comm` | 26 ms | the process table |
+| `ioreg -c IOAccelerator` | 19 ms | GPU utilisation and VRAM |
+| `netstat -ib` | 12 ms | throughput |
+| transcript tails | 8 ms | tokens per minute |
+
+The two numbers a person actually watches move cost nothing, so they are
+sampled every frame. **At most one fork runs per frame**, chosen by whichever
+sampler is most overdue against its own staleness budget. That rule exists
+because the first version phased them by modulo and produced 81 ms frames:
+with periods 3/7/13 there are frames where GPU, processes and network all come
+due together. Bounded, the worst frame is the dearest single sampler.
+
+Measured over 25 seconds at 100 ms: **12.8 ms average, 51 ms peak**. The header
+prints both live, so if it ever stops being cheap the screen says so.
+
+Three things it deliberately does not do. `powermetrics` (per-process energy,
+GPU frequency) needs sudo and is not worth a password prompt in a dashboard.
+Per-process GPU attribution is not exposed by macOS without it, so the GPU row
+is machine-wide and says so. And `ps -A -o %cpu` was tried first for the CPU
+figure: it read **8.2%** when the truth was **15.1%**, because macOS reports a
+decaying per-process average.
+
+### The token plot
+
+`out/min` is real history, not a counter since launch. Output tokens are the
+only additive token figure in a transcript — each assistant record carries the
+tokens *that record* produced, so summing them inside a minute is a true
+tokens/minute. Input and cache counts restate the whole context every turn;
+summing those would multiply-count the same tokens dozens of times.
+
+A full scan of every recent transcript measured 188 ms. Each file's byte offset
+is remembered instead, so later calls read only what was appended — 8 ms.
 
 **The glyphs were shaped before they shipped.** `check-art` says the vertical
-ramp `▁▂▃▄▅▆▇█`, the eighths ramp `▏▎▍▌▋▊▉█` and the box drawing are all one
-glyph per cell in JetBrains Mono. Braille is **not in the font at all** — it
-renders as tofu — and neither are the statusline's own `▰▱` gauge blocks, which
-kitty silently falls back to another face to draw. Nothing here uses either.
+ramp `▁▂▃▄▅▆▇█`, the eighths ramp `▏▎▍▌▋▊▉█` and the box drawing are one glyph
+per cell. Braille is not in the font, and neither are the statusline's own `▰▱`
+gauge blocks. Nothing here uses either. A real zero renders as `▁` rather than
+`RAMP[0]`, which is a space — that bug made a fully idle ten-core row draw
+nothing at all.
 
 ---
 
