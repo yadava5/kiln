@@ -9,6 +9,10 @@ on:
 jobs:
   gates:
     runs-on: ubuntu-latest
+    # py_compile would otherwise write .pyc files that embed the source string
+    # literals, which the stray-path check below then flags as real hits.
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -68,7 +72,7 @@ jobs:
       - name: no stray absolute home paths
         run: |
           # install.sh carries the literal because it is what does the rewriting.
-          stray=$(grep -rl "/Users/ayush" kitty claude tools install.sh 2>/dev/null |
+          stray=$(grep -rl --exclude-dir=__pycache__ "/Users/ayush" kitty claude tools install.sh 2>/dev/null |
                   grep -vE '^(install\.sh|kitty/(kitty\.conf|kitty-keys|check-art|tab_bar\.py))$' || true)
           if [ -n "$stray" ]; then
             echo "::error::absolute home path in files install.sh does not rewrite:"
