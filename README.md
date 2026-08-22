@@ -16,9 +16,10 @@ theme's contrast audit on the right](docs/media/01-hero.png)
 
 Two halves that were designed against each other:
 
-* **`kitty/`** — the terminal. 563 lines of `kitty.conf`, an 833 line custom
-  `tab_bar.py`, a palette (`kiln`) whose every slot is contrast audited, and
-  the background image generator that renders real USGS elevation data.
+* **`kitty/`** — the terminal. 563 lines of `kitty.conf`, a palette (`kiln`)
+  whose every slot is contrast audited, the background image generator that
+  renders real USGS elevation data, and an 833 line `tab_bar.py` that is
+  dormant on purpose (see below).
 * **`claude/`** — what runs in it. A 1,122 line statusline that reads Claude
   Code's own payload rather than guessing, six subagent definitions, four
   hooks, and the colour-math library the palette is checked with.
@@ -67,10 +68,19 @@ that category change was the point: the ground the last four years happened
 on beats a procedural pattern. `oxford-topo-gen.py` regenerates it; the
 rejected designs are kept as SVG source in the same directory.
 
-**Tab bar.** Bottom edge, one row, separator style, custom `draw_tab` in
-`tab_bar.py`. It sits directly under Claude Code's input box. Tab titles
-render the basename when the title is a path, so a tab reads `3 kiln ×2`
-rather than `3 /Users/ayush/.config/kit…`, with `×N` marking split panes.
+**Tab bar.** Bottom edge, one row, `tab_bar_style separator`. It sits
+directly under Claude Code's input box. Tab titles render the basename when
+the title is a path, so a tab reads `3 kiln ×2` rather than
+`3 /Users/ayush/.config/kit…`, with `×N` marking split panes. That is
+`tab_title_template` doing the work, not Python.
+
+**`tab_bar.py` is not loaded, deliberately.** A custom `draw_tab` only runs
+under `tab_bar_style custom`, and this config sets `separator`. The file is
+kept because a horizontal kitty tab bar is exactly one row — `Screen(None, 1,
+…)` — and one row is not a stage, which is why the cat moved to the Claude
+Code statusline. kitty 0.48 added vertical tab bars, where the bar is a real
+multi-row screen, and the file becomes useful again there. Its docstring
+carries the two porting notes. Do not read it as active code.
 
 **Motion.** Exactly one animation in the terminal itself: `cursor_trail`,
 which only has frames to draw while the cursor is actually moving. There is
@@ -217,8 +227,9 @@ advisories including [GHSA-qfgm-2c64-6x3x](https://github.com/kovidgoyal/kitty/s
 both of which trigger on bytes merely being printed to the terminal. That is
 the whole day when an agent is pasting fetched pages and build logs into it.
 `allow_remote_control socket-only` does not mitigate the second one.
-`jq` is required by the statusline. `python3` is required by `tab_bar.py`,
-`check-art` and `kitty-palcheck.py`; `check-art` also needs `hb-shape` from
+`jq` is required by the statusline. `python3` is required by
+`check-art` and `kitty-palcheck.py` (and `tab_bar.py`, if you ever enable
+it); `check-art` also needs `hb-shape` from
 HarfBuzz. `eza`, `bat` and `starship` are what the screenshots show but
 nothing here depends on them.
 
@@ -282,7 +293,9 @@ difftastic has already reported two differing directories as identical here.
 ### Implemented here
 
 * The `kiln` palette, its APCA/WCAG/CVD audit, and the colour math library.
-* `tab_bar.py` — custom `draw_tab`, path aware titles, split pane counts.
+* `tab_bar.py` — a horizontal custom `draw_tab`, written and then shelved
+  when the cat moved to the statusline. Dormant, not dead: it is the starting
+  point for the 0.48 vertical bar.
 * `statusline.sh` — payload parsing, rate limit gauges, the animated stage.
 * `check-art` — HarfBuzz shaping gate for terminal art.
 * `oxford-topo-gen.py` — fetches elevation tiles and renders the contours.
@@ -328,7 +341,7 @@ kitty/
   kitty.conf            main config, 563 lines, comments carry the measurements
   current-theme.conf    applied last, overrides everything above it
   themes/kiln.conf      the palette
-  tab_bar.py            custom draw_tab
+  tab_bar.py            custom draw_tab, DORMANT (needs tab_bar_style custom)
   kitty-keys            cmd+/ overlay, generated from kitty.conf
   kitty-cats            every cat this setup can draw, at real size
   kitty-theme           live palette switch over the control socket
