@@ -56,14 +56,16 @@ fi
 [ "$miss" = 1 ] && say "continuing anyway; the missing pieces degrade individually"
 
 head_ "kitty"
-for f in kitty.conf current-theme.conf shell.zsh tab_bar.py check-art kitty-cats kitty-keys kitty-theme kiln-top kiln-top-open kiln-sample.py; do
+for f in kitty.conf current-theme.conf shell.zsh tab_bar.py check-art kitty-cats kitty-keys kitty-theme kiln-top kiln-top-open kiln-sample.py kiln-md; do
   place "$SRC/kitty/$f" "$KITTY/$f"
 done
 for f in "$SRC"/kitty/themes/*; do place "$f" "$KITTY/themes/$(basename "$f")"; done
 for f in "$SRC"/kitty/backgrounds/*; do
   [ -f "$f" ] && place "$f" "$KITTY/backgrounds/$(basename "$f")"
 done
-for f in check-art kitty-cats kitty-keys kitty-theme kiln-top kiln-top-open; do run /bin/chmod +x "$KITTY/$f"; done
+for f in check-art kitty-cats kitty-keys kitty-theme kiln-top kiln-top-open kiln-md; do run /bin/chmod +x "$KITTY/$f"; done
+
+place "$SRC/kitty/assets/github-markdown.css" "$KITTY/assets/github-markdown.css"
 
 head_ "btop theme"
 place "$SRC/btop/themes/kiln.theme" "$HOME/.config/btop/themes/kiln.theme"

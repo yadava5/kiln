@@ -263,6 +263,35 @@ nothing at all.
 
 ---
 
+## Previewing markdown
+
+`cmd+shift+v` labels every `.md` path on screen; pick one and it opens in the
+browser rendered by **GitHub's own renderer**, not a local reimplementation.
+`kiln-md FILE` does the same from the shell, and `kiln-md -t FILE` gives an
+instant terminal version through `glow` with no network at all.
+
+![The kiln README previewed locally in GitHub's dark theme, with the banner,
+screenshots and SVG figures all loading from disk](docs/media/11-md-preview.png)
+
+`gh api /markdown --mode gfm` is the renderer github.com runs, so what comes
+back is not an approximation of GitHub-flavoured markdown — it is the article
+markup itself, task lists and `markdown-accessiblity-table` wrappers included.
+Round trip measured at 0.43 s, which is why it is the default rather than a
+fallback. Without network or `gh` it drops to `pandoc` and says so, rather than
+pretending the two are identical.
+
+Two things the local preview does **better** than github.com, deliberately:
+
+* **Relative images resolve.** A `<base href>` at the file's directory means
+  `docs/media/…` loads off disk, so you see the figures before pushing them.
+* **Mermaid draws.** GitHub renders mermaid client-side, so the API hands back
+  a syntax-highlighted `div`, not a code block — the first attempt matched
+  `<code class="language-mermaid">` and silently found nothing. The spans are
+  stripped back to source and handed to mermaid, which is what GitHub's own
+  front end does.
+
+---
+
 ## Agents and hooks
 
 ![Agent routing: six agents in two tiers, and the PreToolUse hook that

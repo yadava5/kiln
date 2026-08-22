@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""kiln-md — see a markdown file the way GitHub will render it.
+
+    kiln-md README.md          GitHub's own renderer, opened in the browser
+    kiln-md -t README.md       instant terminal preview (glow), no network
+    kiln-md --offline FILE     pandoc instead of the API
+    kiln-md --print FILE       write the HTML and print its path, open nothing
+
+WHY THE API AND NOT A LOCAL LIBRARY. `gh api /markdown --mode gfm` is the
+renderer GitHub itself runs, so what comes back is not an approximation of
+GitHub-flavoured markdown, it IS it — task lists, tables, autolinks, footnotes,
+the `markdown-accessiblity-table` wrapper and all. Every local library is a
+reimplementation that differs at the edges, which is exactly where a preview
+stops being useful. Measured at 0.43 s for a round trip, which is fast enough
+to be the default.
+
+Two things this preview does BETTER than github.com, on purpose:
+
+  * relative images resolve. A `<base href>` pointing at the file's directory
+    means docs/media/foo.png loads off disk, so you see the images before they
+    are pushed anywhere.
+  * mermaid renders. GitHub draws mermaid client-side, so the API hands back a
+    plain code block; this rewrites those into mermaid containers and loads the
+    library, which is the same thing GitHub's front end does.
+
+Falls back to pandoc with the same stylesheet when there is no network or no
+`gh`, and says which renderer it used rather than pretending they are the same.
+"""
+import html
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CSS = os.path.join(HERE, "assets", "github-markdown.css")
+
+
+def sh(*a, **kw):
+    return subprocess.run(a, capture_output=True, text=True, **kw)
+
+
+def repo_context(path):
+    """owner/repo for the file's checkout, so #123 and @user autolink like they
+    would in that repository. Silently skipped outside a git repo."""
+    d = os.path.dirname(os.path.abspath(path)) or "."
+    r = sh("git", "-C", d, "remote", "get-url", "origin")
+    if r.returncode:
+        return None
+    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", r.stdout.strip())
+    return m.group(1) if m else None
+
+
+def render_github(text, context):
+    body = {"text": text, "mode": "gfm"}
+    if context:
+        body["context"] = context
+    r = subprocess.run(["gh", "api", "--method", "POST", "/markdown",
+                        "--input", "-"], input=json.dumps(body),
+                       capture_output=True, text=True)
+    if r.returncode:
+        return None, (r.stderr or "").strip().splitlines()[:1]
+    return r.stdout, None
+
+
+def render_pandoc(path):
+    r = sh("pandoc", "-f", "gfm", "-t", "html", path)
+    return (r.stdout, None) if r.returncode == 0 else (None, r.stderr[:120])
+
+
+# GitHub does NOT hand back a plain ```mermaid code block. It syntax-highlights
+# it into <div class="highlight highlight-source-mermaid"><pre …><span …>…,
+# so recovering the diagram source means stripping those spans and unescaping.
+# Matching the code-block form instead silently found nothing.
+MERMAID = re.compile(
+    r'<div class="highlight highlight-source-mermaid">\s*<pre[^>]*>(.*?)</pre>\s*</div>',
+    re.S)
+_TAGS = re.compile(r"<[^>]+>")
+
+
+def wrap(body, path, renderer):
+    base = os.path.dirname(os.path.abspath(path))
+    title = os.path.basename(path)
+    has_mermaid = bool(MERMAID.search(body))
+    body = MERMAID.sub(
+        lambda m: '<pre class="mermaid">%s</pre>'
+                  % html.unescape(_TAGS.sub("", m.group(1))),
+        body)
+    css = ""
+    if os.path.exists(CSS):
+        with open(CSS, encoding="utf-8") as f:
+            css = f.read()
+    mermaid_js = ("""
+<script type="module">
+  import m from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  m.initialize({startOnLoad: true, theme: dark ? 'dark' : 'default'});
+</script>""" if has_mermaid else "")
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<base href="file://{html.escape(base)}/">
+<title>{html.escape(title)}</title>
+<style>
+{css}
+body {{ margin:0; background:#0d1117; }}
+@media (prefers-color-scheme: light) {{ body {{ background:#fff; }} }}
+.markdown-body {{ box-sizing:border-box; min-width:200px; max-width:980px;
+                  margin:0 auto; padding:45px 45px 120px; }}
+@media (max-width:767px) {{ .markdown-body {{ padding:15px; }} }}
+.kiln-foot {{ max-width:980px; margin:0 auto; padding:0 45px 40px;
+              font:12px ui-monospace,SFMono-Regular,Menlo,monospace;
+              color:#7d8590; }}
+</style></head>
+<body><article class="markdown-body">
+{body}
+</article>
+<div class="kiln-foot">{html.escape(title)} · rendered by {renderer}</div>
+{mermaid_js}
+</body></html>"""
+
+
+def main():
+    argv = sys.argv[1:]
+    term = "-t" in argv or "--term" in argv
+    offline = "--offline" in argv
+    printonly = "--print" in argv
+    files = [a for a in argv if not a.startswith("-")]
+    if not files:
+        print(__doc__.strip().split("\n\n")[1], file=sys.stderr)
+        return 2
+    path = files[0]
+    if not os.path.exists(path):
+        print(f"kiln-md: no such file: {path}", file=sys.stderr)
+        return 1
+
+    if term:
+        import shutil
+        glow = shutil.which("glow") or "/opt/homebrew/bin/glow"
+        if not os.path.exists(glow):
+            print("kiln-md: glow is not installed (brew install glow)",
+                  file=sys.stderr)
+            return 1
+        w = os.environ.get("COLUMNS")
+        cols = min(int(w), 120) if w and w.isdigit() else 100
+        # -p pages. In a pipeline there is no tty for the pager to own and it
+        # hangs forever, which is how this first came back as a 2 minute
+        # timeout rather than an error.
+        args = [glow, "-w", str(cols)] + (["-p"] if sys.stdout.isatty() else []) + [path]
+        os.execv(glow, args)
+
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+
+    renderer, body, err = "GitHub (gh api /markdown, mode=gfm)", None, None
+    if not offline:
+        body, err = render_github(text, repo_context(path))
+    if body is None:
+        renderer = "pandoc -f gfm"
+        body, perr = render_pandoc(path)
+        if body is None:
+            print("kiln-md: no renderer worked."
+                  f"\n  gh:     {err}\n  pandoc: {perr}", file=sys.stderr)
+            return 1
+        if not offline:
+            print(f"kiln-md: gh unavailable ({err}); fell back to pandoc,"
+                  " which is NOT byte-identical to GitHub", file=sys.stderr)
+
+    out = os.path.join(tempfile.gettempdir(),
+                       "kiln-md-" + re.sub(r"\W+", "-", os.path.abspath(path)) + ".html")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(wrap(body, path, renderer))
+    if printonly:
+        print(out)
+        return 0
+    subprocess.run(["/usr/bin/open", out])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
