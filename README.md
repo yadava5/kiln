@@ -1,5 +1,9 @@
 # kiln
 
+![The Claude Code statusline as it actually runs: model, effort, project,
+context, the rate limit gauges, and a cat hopping across the stage beneath
+them](docs/media/00-banner.gif)
+
 A kitty terminal built around long Claude Code sessions, and the Claude Code
 configuration that lives inside it. Warm dark palette, a real topographic map
 of Oxford, Ohio behind the text, a bottom tab bar, and a statusline that walks
@@ -162,6 +166,13 @@ minimum, gets silently discarded, and no timer is armed at all. Those same
 idle sessions fell from 20 renders per 20 seconds to 1. Integer seconds, floor
 of 1.
 
+**It hops; it does not walk.** That is the whole design, and it was arrived at
+by changing the verb rather than redrawing the art. At 1 fps there is no
+apparent motion, so a walk cycle is a high frequency signal sampled at 1 Hz and
+what comes back is aliasing. The cat now translates rigidly between two poses —
+one channel, and it is the motion channel. Seven motions: hop, scamper, pounce,
+stretch, yawn, sleep, and a moth it chases and misses.
+
 The face changes with context pressure and the pose changes with whether
 Claude is working:
 
@@ -279,6 +290,10 @@ kitty/kitty-cats
 
 # Drift between this repo and the config actually installed.
 tools/check-sync.sh
+
+# Re-render the banner from the live statusline. If the banner is wrong,
+# the statusline is wrong — nothing in the harness draws a cat.
+python3 tools/make-banner.py
 ```
 
 `check-sync.sh` is the one that matters over time. This repo is a mirror of
@@ -328,6 +343,14 @@ Kept because the reasons outlive the decisions:
   bar and eats every mouse event on the screen. Not fixable from config.
 * **A dedicated split pane for it.** Works, at any framerate. Rejected because
   it steals pane space and is in the way while working.
+* **A walking cat, in side profile.** Six versions, all rejected 2026-08-10,
+  and this is the one to read before redrawing anything. A walk cycle is a
+  high frequency signal being sampled at 1 Hz; what a viewer gets back is
+  aliasing, so the animation reads as broken rather than alive. The side
+  profile also put the face on screen only 60% of the time — the face is the
+  reason anyone looks at it. Replaced by rigid two-pose translation, which is
+  what the banner above shows. Do not reintroduce a walk cycle at this
+  refresh rate.
 * **A cheatsheet as the background image.** Shipped through three designs and
   failed all three. Text over a busy region is exactly what made it
   unreadable. The reference belongs on a key, which is what `cmd+/` is.
@@ -351,11 +374,13 @@ kitty/
 claude/
   statusline.sh         the instruments and the stage
   statusline-demo.sh    renders the stage to GIFs without touching a live session
+  stage-preview.py      the GIF harness: runs the real statusline, paints its bytes
   agents/               six subagent definitions
   hooks/                four hooks
   scripts/              kitty-palcheck.py, palmath.py
 tools/
   check-sync.sh         drift gate: this repo vs what is installed
+  make-banner.py        re-renders the banner and the two cat GIFs above
 docs/media/             the screenshots and animations above
 ```
 

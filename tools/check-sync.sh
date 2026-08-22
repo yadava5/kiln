@@ -54,6 +54,7 @@ for f in "$SRC"/kitty/themes/* "$SRC"/kitty/backgrounds/*; do
 done
 cmp_one "$SRC/claude/statusline.sh"      "$CLAUDE/statusline.sh"
 cmp_one "$SRC/claude/statusline-demo.sh" "$CLAUDE/statusline-demo.sh"
+cmp_one "$SRC/claude/stage-preview.py"    "$CLAUDE/stage-preview.py"
 for f in "$SRC"/claude/agents/*.md;  do cmp_one "$f" "$CLAUDE/agents/$(basename "$f")"; done
 for f in "$SRC"/claude/hooks/*.sh;   do cmp_one "$f" "$CLAUDE/hooks/$(basename "$f")"; done
 for f in "$SRC"/claude/scripts/*.py; do cmp_one "$f" "$CLAUDE/scripts/$(basename "$f")"; done

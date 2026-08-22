@@ -68,6 +68,7 @@ for f in check-art kitty-cats kitty-keys kitty-theme; do run /bin/chmod +x "$KIT
 head_ "claude code"
 place "$SRC/claude/statusline.sh"      "$CLAUDE/statusline.sh"
 place "$SRC/claude/statusline-demo.sh" "$CLAUDE/statusline-demo.sh"
+place "$SRC/claude/stage-preview.py"    "$CLAUDE/stage-preview.py"
 run /bin/chmod +x "$CLAUDE/statusline.sh" "$CLAUDE/statusline-demo.sh"
 for f in "$SRC"/claude/agents/*.md;  do place "$f" "$CLAUDE/agents/$(basename "$f")"; done
 for f in "$SRC"/claude/hooks/*.sh;   do place "$f" "$CLAUDE/hooks/$(basename "$f")"; run /bin/chmod +x "$CLAUDE/hooks/$(basename "$f")"; done
