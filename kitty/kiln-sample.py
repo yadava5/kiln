@@ -301,10 +301,16 @@ def token_minutes(window_s=1800, tail=262144):
                         f.readline()
                 else:
                     f.seek(prev)
-                data = f.read().decode("utf-8", "replace")
-                _tok_offset[path] = f.tell()
+                base = f.tell()
+                raw = f.read()
         except Exception:
             continue
+        # Same partial-line rule as agent_index: a transcript being appended to
+        # can be read mid-line, and advancing the offset past it would drop
+        # that line's tokens for good.
+        cut = raw.rfind(b"\n") + 1
+        _tok_offset[path] = base + cut
+        data = raw[:cut].decode("utf-8", "replace")
         buckets = _tok_buckets
         for line in data.splitlines():
             if '"output_tokens"' not in line:
@@ -418,9 +424,15 @@ def _ai_refresh():
             with open(p, "rb") as f:
                 f.seek(r["off"])
                 data = f.read()
-                r["off"] = f.tell()
         except OSError:
             continue
+        # A transcript being appended to can be read mid-line. Stop the offset
+        # at the last COMPLETE line so the partial one is re-read next time;
+        # advancing past it drops that usage block for good, and the loss is
+        # silent — the only symptom is a total that is quietly too low.
+        cut = data.rfind(b"\n") + 1
+        r["off"] += cut
+        data = data[:cut]
         r["mt"] = st.st_mtime
         # Identity comes from the PATH, which is the only place it is stated:
         #   .../projects/<enc-cwd>/<session>.jsonl                  a session

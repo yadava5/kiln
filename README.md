@@ -179,6 +179,12 @@ day-old one. Rule 1 is what does the work. Records from sessions that have
 exited are pruned by their own observed-at stamp, not by the window, because a
 weekly epoch stays valid for days after the session that wrote it is gone.
 
+The **fable** gauge beside them never had this defect and is unchanged: it is
+not in the payload at all. `usage-refresh.sh` fetches it from the API and
+writes `cache/fablelimit` atomically, at most once a minute across every
+session — a shared attempt-stamp exists precisely to stop ten sessions each
+spawning a curl. One writer, one account-wide figure, nothing to merge.
+
 ### The cat
 
 | idle — 1 render a second | working — ~3 a second |
