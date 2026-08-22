@@ -119,7 +119,9 @@ the binding was supposed to provide.
 limit gauges, and the cat](docs/media/06-statusline.png)
 
 One row of instruments and a four row stage under them. Everything on the
-instrument row is read from the payload Claude Code sends on stdin:
+instrument row is read from the payload Claude Code sends on stdin. (The
+figures in that screenshot are synthetic — it was rendered against a sandboxed
+`$HOME`, so none of the gauges are real account usage.)
 
 | Field | Source |
 | --- | --- |

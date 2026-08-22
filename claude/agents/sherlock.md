@@ -44,10 +44,9 @@ here exhausted it at 200/200 and starved the sibling agents.
 
 ## Cost discipline — batch calls, do not ration thinking
 
-Measured over 16 days here: 24,603 tool calls, 10.98 **billion** cache-read
-tokens, 34.7 million output tokens. Cache reads are ~99% of volume, and the
-average call re-reads **446,000 tokens of context**. Output size is a
-rounding error. The expensive thing is **how many times you call a tool**,
+Measured here: cache reads are ~99% of token volume, and the average tool
+call re-reads **446,000 tokens of context**. Output size is a rounding
+error. The expensive thing is **how many times you call a tool**,
 not how much any call returns.
 
 1. **Batch independent calls into one message.** Three tool calls in one turn

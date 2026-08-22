@@ -3,8 +3,8 @@
 
 Parses kitty config syntax (`color1 #RRGGBB`, `background #RRGGBB`, ...).
 All colour math (WCAG 2.1, APCA 0.98G-4g, CIEDE2000, Machado CVD) is imported
-from ghostty-palcheck.py in this directory so there is exactly one
-implementation of the formulas. Only the parser and the gates live here.
+from palmath.py in this directory so there is exactly one implementation of
+the formulas. Only the parser and the gates live here.
 
 Gates (dark theme):
   foreground vs background      >= 4.5:1 WCAG (target 7+), APCA |Lc| >= 90
