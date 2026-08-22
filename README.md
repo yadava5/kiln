@@ -101,13 +101,23 @@ drift.
 ![The cmd+/ overlay: tabs, panes, scrollback and screen grabbing, each row
 next to the binding that produces it](docs/media/02-keys.png)
 
-The two worth calling out for Claude Code work:
+Five worth calling out for Claude Code work:
 
 * **`cmd+alt+d`** splits 2/3 : 1/3 instead of 50/50. Claude Code truncates
   rows rather than wrapping them; an even split of a 165-column window gives
   81 columns a side and starts cutting output. Biased, 108 and 54.
 * **`cmd+shift+o`** copies the last command's entire output to the clipboard.
   The one to reach for after a build fails and Claude wants the log.
+* **`cmd+alt+g`** pages the output of the command `cmd+up` last jumped to.
+  `cmd+shift+g` can only ever give the *last* command; this gives the one you
+  walked back to. Walk back three builds, open that build's output alone.
+* **`cmd+shift+up` / `cmd+shift+down`** jump between the `error` / `warn` /
+  `fail` marks `cmd+shift+m` paints. That binding highlighted them across
+  20,000 lines and then gave no way to reach one — you still scrolled looking
+  for colour. These are the missing half of it, and they are inert while the
+  marker is off.
+* **`cmd+shift+j`** picks a pane by label — and with only two panes open it
+  skips the overlay and switches directly, so it is a zero-thought toggle.
 
 `shift+enter` is deliberately **not** mapped: a `send_text` map would hand the
 app a bare `\n`, which many TUIs read as submit.
