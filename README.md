@@ -72,10 +72,16 @@ rejected designs are kept as SVG source in the same directory.
 render the basename when the title is a path, so a tab reads `3 kiln ×2`
 rather than `3 /Users/ayush/.config/kit…`, with `×N` marking split panes.
 
-**Motion.** Exactly one animation in the terminal itself: `cursor_trail 3`,
+**Motion.** Exactly one animation in the terminal itself: `cursor_trail`,
 which only has frames to draw while the cursor is actually moving. There is
 no idle timer and no idle repaint. Everything else that moves was moved out
 to the statusline on purpose, where its cost is measured separately.
+
+The value is **milliseconds, not a trail length** — it is the time a cursor
+must have sat still before a jump earns a trail, which is how kitty suppresses
+trails during the constant repaints of a busy TUI. This config ships `3`,
+which is low enough that the suppression effectively never engages, so the
+trail does animate while Claude Code streams. Raise it if that bothers you.
 
 ---
 
@@ -202,6 +208,13 @@ copies the trees into place, and rewrites the absolute paths in `kitty.conf`,
 prints every path it touches and takes `--dry-run`.
 
 **Dependencies.** kitty 0.46+ and `JetBrainsMono Nerd Font Mono` are required.
+**Use 0.48.2 or newer.** Everything here runs on 0.46.2, which is what the
+screenshots were taken on, but 0.46.2 is affected by several kitty security
+advisories including [GHSA-qfgm-2c64-6x3x](https://github.com/kovidgoyal/kitty/security/advisories/GHSA-qfgm-2c64-6x3x)
+(CVSS 9.9) and [GHSA-w98g-hpvr-r332](https://github.com/kovidgoyal/kitty/security/advisories/GHSA-w98g-hpvr-r332),
+both of which trigger on bytes merely being printed to the terminal. That is
+the whole day when an agent is pasting fetched pages and build logs into it.
+`allow_remote_control socket-only` does not mitigate the second one.
 `jq` is required by the statusline. `python3` is required by `tab_bar.py`,
 `check-art` and `kitty-palcheck.py`; `check-art` also needs `hb-shape` from
 HarfBuzz. `eza`, `bat` and `starship` are what the screenshots show but
