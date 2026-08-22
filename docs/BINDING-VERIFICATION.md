@@ -1,9 +1,14 @@
 # Binding verification — 2026-08-22
 
-Every key binding added on 2026-08-21/22 was exercised against a running kitty
-and read back from a measurable quantity. Two of them were broken. This file
-records the instrument as much as the result, because the instrument is what
-took the longest to get right.
+Seventeen bindings — the thirteen added on 2026-08-21/22 plus four they depend
+on — were exercised against a running kitty and read back from a measurable
+quantity. Three keys were dead. This file records the instrument as much as the
+result, because the instrument is what took the longest to get right.
+
+One of the three was not new. `cmd+shift+m` came in with the initial mirror of
+the existing config, which means the mark highlighting had never worked, and
+`cmd+shift+up` / `cmd+shift+down` were built on top of a feature that was
+already dead.
 
 ## What was wrong
 
@@ -32,7 +37,9 @@ so `cmd+shift+m` marked nothing, so `cmd+shift+up` / `cmd+shift+down`
 
 `tools/check-map-escapes.py` now gates this, and CI runs it against a copy of
 the config with the quotes stripped back out — the gate has been watched
-rejecting the exact line that shipped.
+rejecting the exact line that shipped. It accepts both working forms: a
+doubled `\\` is a deliberate literal backslash, not a loss, and flagging it
+would be a gate that reds on a correct line.
 
 ## The instrument
 
@@ -49,7 +56,11 @@ So the chain is verified in two halves, both mechanical:
 
 * **chord → definition**, by loading the real `kitty.conf` through kitty's own
   parser and reading `keyboard_modes[""].keymap`, then splitting the definition
-  the way kitty does. This is the half where the bug lived.
+  the way kitty does. This is the half where the bug lived. Run for all
+  seventeen chords, not just the broken ones: each resolves to exactly the
+  string that was then fed to `@ action`, and none of them carries more than
+  one definition — the keymap value is a *list*, kitty's own default first and
+  the user override last, so a shadowed chord would otherwise pass unnoticed.
 * **definition → effect**, by running the definition verbatim through
   `@ action` and reading back a quantity: layout name, per-window `columns`,
   the `neighbors` map, screen text. Never a screenshot judgement — a
@@ -82,7 +93,8 @@ not a bare `\x1b`, because the kitten has the kitty keyboard protocol on.
 | `cmd+shift+e` | hints line | whole line pasted at the prompt | ok |
 | `cmd+/` | `kitty-keys` overlay | rendered in full, all four sections | ok |
 
-The marker pair was verified as a **paired control** rather than a single
+Seventeen rows, seventeen passes after the fix. The marker pair was verified
+as a **paired control** rather than a single
 observation: the old unquoted spec left `scroll_to_mark prev` motionless
 (0 sentinels on screen), the single-quoted spec moved the viewport to the mark.
 Same window, same scrollback, one character of difference.

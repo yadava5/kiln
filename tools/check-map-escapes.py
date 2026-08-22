@@ -64,6 +64,33 @@ def kitty_split(s):
     return out
 
 
+def lost_backslashes(action):
+    """Count backslashes kitty will consume that the author did not double.
+
+    Outside single quotes a backslash escapes the next character and is
+    dropped. `\\\\` is therefore a DELIBERATE literal backslash and is not a
+    defect — kitty delivers one, which is what was asked for. A lone `\\S` is
+    the defect: the author wrote a regex escape and kitty delivers a bare S.
+    """
+    lost, i, n, quote = 0, 0, len(action), ""
+    while i < n:
+        c = action[i]
+        if quote == "'":
+            if c == "'":
+                quote = ""
+        elif c == "\\" and i + 1 < n:
+            if action[i + 1] == "\\":
+                i += 1          # a doubled pair, deliberate, delivers one
+            else:
+                lost += 1
+        elif c == "'" and quote == "":
+            quote = "'"
+        elif c == '"' and quote == "":
+            pass                # double quotes do not protect a backslash here
+        i += 1
+    return lost
+
+
 def check(path):
     bad = []
     for lineno, line in enumerate(open(path, encoding="utf-8"), 1):
@@ -78,24 +105,27 @@ def check(path):
             continue
         if action.split(None, 1)[0] in RAW_ACTIONS:
             continue
-        before = action.count("\\")
-        after = sum(t.count("\\") for t in kitty_split(action))
-        if after < before:
-            bad.append((lineno, before - after, line))
+        lost = lost_backslashes(action)
+        if lost:
+            bad.append((lineno, lost, line))
     return bad
 
 
 def selftest():
-    """The four forms, against what kitty 0.46.2 actually produced."""
+    """The four forms, against what kitty 0.46.2 actually produced, and the
+    verdict the gate must reach on each."""
     cases = [
-        (r"a --regex (?m)\S+\.(?:md|mdx)\b b", r"(?m)S+.(?:md|mdx)b"),
-        (r'''a --regex "(?m)\S+\.(?:md|mdx)\b" b''', r"(?m)S+.(?:md|mdx)b"),
-        (r"""a --regex '(?m)\S+\.(?:md|mdx)\b' b""", r"(?m)\S+\.(?:md|mdx)\b"),
-        (r"a --regex (?m)\\S+\\.(?:md|mdx)\\b b", r"(?m)\S+\.(?:md|mdx)\b"),
+        # source                                              kitty gives      gate
+        (r"a --regex (?m)\S+\.(?:md|mdx)\b b", r"(?m)S+.(?:md|mdx)b", 3),
+        (r'''a --regex "(?m)\S+\.(?:md|mdx)\b" b''', r"(?m)S+.(?:md|mdx)b", 3),
+        (r"""a --regex '(?m)\S+\.(?:md|mdx)\b' b""", r"(?m)\S+\.(?:md|mdx)\b", 0),
+        (r"a --regex (?m)\\S+\\.(?:md|mdx)\\b b", r"(?m)\S+\.(?:md|mdx)\b", 0),
     ]
-    for src, want in cases:
+    for src, want, want_lost in cases:
         got = kitty_split(src)[2]
         assert got == want, f"splitter disagrees with kitty: {src!r} -> {got!r} != {want!r}"
+        lost = lost_backslashes(src)
+        assert lost == want_lost, f"verdict wrong for {src!r}: {lost} != {want_lost}"
     return True
 
 
