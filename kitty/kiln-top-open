@@ -1,0 +1,48 @@
+#!/bin/zsh
+# Open the activity dashboard in its OWN kitty tab, or focus it if already open.
+#
+# WHY NOT AN OVERLAY. cmd+shift+a used `launch --type=overlay`, which layers the
+# dashboard over the CURRENT pane. Measured 2026-08-22 against a staged kitty
+# running a full-screen TUI: the overlay covers the pane completely — the TUI is
+# still alive underneath and keeps redrawing, but it is invisible and untypeable
+# until the overlay closes. Doing that to a live Claude Code pane is exactly
+# backwards for a thing whose job is to watch Claude work.
+#
+# A tab costs nothing, sits beside the work instead of on top of it, and is
+# reachable by cmd+number like everything else.
+#
+# Launched with --type=background so this script has no window of its own; it
+# decides whether a tab is needed and asks kitty to make one. Remote control
+# comes from --allow-remote-control on the launch, the same pattern cmd+shift+b
+# already uses for the broadcast kitten.
+emulate -L zsh
+setopt no_unset pipefail
+
+sock="${KITTY_LISTEN_ON:-}"
+[[ -z "$sock" ]] && exec "${0:A:h}/kiln-top"
+
+kitten @ --to "$sock" ls 2>/dev/null > /tmp/.kiln-top-ls.$$ || {
+  rm -f /tmp/.kiln-top-ls.$$; exec "${0:A:h}/kiln-top"
+}
+
+existing=$(/usr/bin/python3 - "/tmp/.kiln-top-ls.$$" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+for w in d:
+    for t in w.get("tabs", []):
+        for win in t.get("windows", []):
+            if (win.get("title") or "") == "activity":
+                print(win["id"]); sys.exit(0)
+PY
+)
+rm -f /tmp/.kiln-top-ls.$$
+
+if [[ -n "$existing" ]]; then
+  kitten @ --to "$sock" focus-window --match "id:$existing" >/dev/null 2>&1
+else
+  kitten @ --to "$sock" launch --type=tab --tab-title activity \
+      --title activity "${0:A:h}/kiln-top" >/dev/null 2>&1
+fi

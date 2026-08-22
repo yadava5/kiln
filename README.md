@@ -172,15 +172,25 @@ ligature](docs/media/04-check-art.png)
 
 ## The activity dashboard
 
-`cmd+shift+a` opens an overlay showing what the machine and the agents are
-actually doing. `q` closes it.
+`cmd+shift+a` opens the dashboard **in its own kitty tab**. `q` closes it,
+and pressing the key again focuses the existing tab rather than opening a
+second one.
 
 ![The activity dashboard: CPU, memory, battery and network; the live Claude
 Code sessions with their working directory and resident size; and the running
 subagents with model, elapsed time and token counts](docs/media/09-activity.png)
 
-It costs nothing until it is open, which is why it is a key rather than a pane
-— the same reason the terminal itself has no idle repaints.
+It costs nothing until it is open, which is why it is a key rather than a
+resident pane — the same reason the terminal itself has no idle repaints.
+
+**A tab, not an overlay, and that was measured.** The first version used
+`--type=overlay`, like the `cmd+/` cheatsheet. Driven against a staged kitty
+running a full-screen TUI, the overlay covered the pane completely: the TUI
+kept running underneath and its redraw counter kept advancing, but it was
+invisible and untypeable until the overlay closed. Doing that to a live Claude
+Code pane is backwards for a tool whose whole job is watching Claude work. In a
+tab the same test left all three panes intact and the TUI redrew cleanly on
+return, its counter unbroken from 37 to 208.
 
 Every number is sampled from a real source, and the cheap way was measured
 rather than assumed:
