@@ -207,8 +207,8 @@ def _ep(iso):
 def proj(cwd, branch=""):
     """A name a person recognises, from the checkout an agent actually ran in.
 
-    The raw cwd is useless in a column: every one of them starts
-    /Users/ayush/Documents/Projects and the interesting part is the tail. A
+    The raw cwd is useless in a column: they all share the same home prefix
+    and the interesting part is the tail. A
     worktree is called out explicitly — `wt fold-413` is not the same checkout
     as the repo it was cut from, and an agent working in one cannot see
     uncommitted work in the other.
