@@ -202,6 +202,26 @@ case "$wk_pct"  in ''|*[!0-9-]*) wk_pct=-1  ;; esac
 case "$wk_end"  in ''|*[!0-9]*)  wk_end=0   ;; esac
 case "$out_tok" in ''|*[!0-9]*) out_tok=0 ;; esac
 
+# SCHEMA FALLBACK, added 2026-08-22 — the ctx instrument had gone dark.
+# Claude Code stopped sending `.context_window.used_percentage`. Captured with
+# the debug hook above, the object now carries only:
+#   {"total_input_tokens":453184,"total_output_tokens":2186,
+#    "context_window_size":1000000,"current_usage":{...}}
+# With the key absent, ctx_pct stayed -1 and the instrument rendered "ctx —".
+#
+# This is NOT a return of the transcript-tailing bug the header warns about.
+# That bug read the last usage record out of a DIFFERENT file, which was stale
+# by construction and wrong after /compact. These two numbers are the server's
+# own, in the SAME payload, for THIS render — the same pair already printed as
+# "453k/1M" beside the percentage. Deriving one from the other cannot disagree
+# with what is on screen.
+#
+# The server's own key still wins whenever it is present, so if it comes back
+# this line silently stops firing.
+if [ "$ctx_pct" -lt 0 ] && [ "$ctx_tok" -gt 0 ] && [ "$ctx_win" -gt 0 ]; then
+  ctx_pct=$(( ctx_tok * 100 / ctx_win ))
+fi
+
 # printf's %()T is a bash 4.2+ builtin and saves a date fork per render — but
 # macOS ships /bin/bash 3.2.57, where it fails with
 #   printf: `(': invalid format character

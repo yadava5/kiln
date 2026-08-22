@@ -90,7 +90,12 @@ def frames(sid, n, per_second, out_step, home, cols, stage_only=False):
     return got
 
 
-def render(fr, path, ms, cols, crop=None, size=None, pad=8):
+# Key colour for transparency. Pure magenta appears nowhere in the kiln palette,
+# so quantisation cannot confuse it with a cat pixel.
+KEY = (255, 0, 255)
+
+
+def render(fr, path, ms, cols, crop=None, size=None, pad=8, transparent=False):
     """Paint frames. crop=None trims to the widest painted column; an int is
     a fixed cell window (stable framing while the cat travels). size scales
     the cell grid; the default is stage-preview's own."""
@@ -110,10 +115,18 @@ def render(fr, path, ms, cols, crop=None, size=None, pad=8):
                    if chr_ != " ")
     W = int(cw * crop) + 2 * pad
     H = ch * rows + 2 * pad
+    ground = KEY if transparent else sp.GROUND
     imgs = []
     for f in fr:
-        im = Image.new("RGB", (W, H), sp.GROUND)
+        im = Image.new("RGB", (W, H), ground)
         d = ImageDraw.Draw(im)
+        if transparent:
+            # GIF alpha is 1-bit. An anti-aliased glyph edge is a BLEND of the
+            # glyph colour and the key colour, which is neither fully keyed out
+            # nor the right colour — it ships as a magenta halo around every
+            # stroke. fontmode "1" renders without anti-aliasing, so every
+            # pixel is either glyph or key and the 1-bit mask is exact.
+            d.fontmode = "1"
         for r, line in enumerate(f):
             for c, (chr_, col) in enumerate(sp.cells(line)[:crop]):
                 if chr_ == " ":
@@ -121,8 +134,33 @@ def render(fr, path, ms, cols, crop=None, size=None, pad=8):
                 fnt = fnt_main if ord(chr_) in have else alt
                 d.text((pad + c * cw, pad + r * ch), chr_, font=fnt, fill=col)
         imgs.append(im)
-    imgs[0].save(path, save_all=True, append_images=imgs[1:], duration=ms,
-                 loop=0, optimize=True)
+    if transparent:
+        # The logo sits directly on the reader's page, not on a plate: a dark
+        # rectangle behind it reads as a card floating on GitHub's background.
+        # So it is painted on a key colour and that colour is made transparent.
+        #
+        # THE KEYING IS DONE BY IMAGEMAGICK, NOT PIL, and that is deliberate.
+        # Two PIL routes were tried and both shipped a magenta block: per-frame
+        # adaptive palettes make the transparency index stop meaning the key
+        # after frame 1, and forcing one shared palette still did not set the
+        # GIF transparency flag. `magick -transparent` does, and the result is
+        # checked below rather than assumed.
+        #
+        # -dispose Background is REQUIRED: the cat travels, and without it each
+        # frame composites over the last and the hop leaves a smear.
+        import subprocess
+        tmp = str(path) + ".opaque.gif"
+        imgs[0].save(tmp, save_all=True, append_images=imgs[1:], duration=ms,
+                     loop=0, optimize=False)
+        subprocess.run(
+            ["magick", tmp, "-coalesce",
+             "-transparent", "#%02X%02X%02X" % KEY,
+             "-set", "dispose", "Background",
+             str(path)], check=True)
+        pathlib.Path(tmp).unlink()
+    else:
+        imgs[0].save(path, save_all=True, append_images=imgs[1:], duration=ms,
+                     loop=0, optimize=True)
     return W, H, len(imgs)
 
 
@@ -132,7 +170,7 @@ if __name__ == "__main__":
     # (name, sid, frames, renders/s, out_step, ms, cols, stage_only, crop, size)
     jobs = [
         # the logo: a 45-column pane clamps the yard to its minimum
-        ("00-banner", "bnrLogo", 90, 3, 420, 333, 45, True, 20, 52),
+        ("00-banner", "bnrLogo", 90, 3, 420, 333, 45, True, 20, 52),   # transparent
         # the full strip, for the statusline section
         ("statusline-live", "bnrWork", 90, 3, 420, 333, 128, False, None, None),
         # the pair: stage only, half-strip crop, real tempos
@@ -143,5 +181,6 @@ if __name__ == "__main__":
         home = _sandbox_home()
         p = out / f"{name}.gif"
         fr = frames(sid, n, per_s, step, home, cols, stage_only=st)
-        print(name, render(fr, p, ms, cols, crop=crop, size=size, pad=24
-                           if size else 8), "->", p)
+        print(name, render(fr, p, ms, cols, crop=crop, size=size,
+                           pad=24 if size else 8,
+                           transparent=(name == "00-banner")), "->", p)
