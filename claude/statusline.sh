@@ -400,11 +400,16 @@ pct_color() {
 
 # 5-cell gauge → $GAUGE. printf -v, NOT $(printf …): every $(…) is a fork and
 # this runs twice per render. Width 3 keeps the two bars aligned.
+# FIVE PIPS FOR 0..100, and a non-zero reading NEVER rounds away to none.
+# 2% rounded to 0 pips, which is what a broken gauge looks like: the morning a
+# five-hour window reset, a correct 2% was read as "the limits stopped working".
+# A real reading gets at least one pip; only a true zero shows an empty track.
 gauge() {
   local pct=$1 fill i
   pct_color "$pct"
   fill=$(( (pct * 5 + 50) / 100 ))
   [ "$fill" -gt 5 ] && fill=5; [ "$fill" -lt 0 ] && fill=0
+  [ "$fill" -eq 0 ] && [ "$pct" -gt 0 ] && fill=1
   GAUGE="$PCOL"
   for (( i = 0; i < fill; i++ ));  do GAUGE+="▰"; done
   GAUGE+="$C_SEP"
