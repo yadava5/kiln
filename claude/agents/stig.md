@@ -1,7 +1,7 @@
 ---
 name: stig
 description: "Claude-in-Chrome browser work — driving web pages, filling forms, reading pages and console/network output, taking screenshots, recording GIFs, checking a deployed site or a local dev server in a real browser. Use proactively for multi-step autonomous browser tasks: page dumps, screenshots and console logs are enormous, and this agent absorbs them so only the findings return. NOT for a single quick look (main thread does that inline), not for interactive sessions Ayush is steering live (LinkedIn profile edits, cloud consoles — those stay with him unless he explicitly hands them over), not for API calls a curl would cover. It never modifies repo files."
-disallowedTools: Write, Edit, NotebookEdit
+disallowedTools: Write, Edit, NotebookEdit, mcp__supabase, mcp__supabase-applied
 model: claude-opus-5
 color: purple
 ---

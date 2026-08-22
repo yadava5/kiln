@@ -1,16 +1,26 @@
-"""Render the README banner: the REAL statusline, animating, at its real tempo.
+"""Render the README banner and statusline GIFs from the REAL statusline.
 
     python3 tools/make-banner.py
 
 Reuses ~/.claude/stage-preview.py for everything that matters — it runs
 statusline.sh exactly as Claude Code does and paints the SGR the script itself
-emitted, so if the banner is wrong the statusline is wrong. The only things
-changed here are the frame and the payload:
+emitted, so if a GIF is wrong the statusline is wrong. Nothing in this file
+draws a cat. The only things changed per job are the frame and the payload.
 
-  * stage-preview crops to the left 52 columns because it is previewing the CAT.
-    A banner has to show what Claude actually puts on screen, so nothing is
-    cropped and the instrument row above the stage is kept.
-  * the payload names this project rather than $HOME.
+Four jobs:
+
+  * 00-banner.gif — the live logo. The statusline run in a 45-column pane,
+    which is a real geometry: the yard clamps to its minimum and the cat
+    paces a short stretch instead of crossing a wide bar. The instrument row
+    is stripped and the stage cropped to the 20 columns the yard occupies,
+    so what remains reads as a mark, not a screenshot. Rendered at double
+    cell size for a crisp half-scale display in the README.
+  * statusline-live.gif — the whole strip at 128 columns, instrument row
+    included: what Claude actually puts on screen, shown where the README
+    explains the statusline.
+  * 07-cat-idle.gif / 08-cat-busy.gif — the stage only, cropped to the left
+    52 columns (the cat's yard at this width), so the idle/busy pair can sit
+    side by side and still be legible.
 
 Tempo is not a taste. Idle is 1000 ms a frame (the measured refreshInterval=1
 cadence) and working is 333 ms (the ~3 fps that event-driven renders stack up
@@ -31,8 +41,6 @@ if not SP.exists():
 _spec = importlib.util.spec_from_file_location("stage_preview", SP)
 sp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sp)
-
-COLS = 128
 
 # kitty falls back to another face for codepoints JetBrainsMono does not carry —
 # the gauge blocks U+25B0/U+25B1 are NOT in the Nerd Font (verified with
@@ -68,41 +76,50 @@ def payload(sid, out):
     )
 
 
-def frames(sid, n, per_second, out_step, home):
-    """Full statusline lines — instrument row included, nothing stripped."""
+def frames(sid, n, per_second, out_step, home, cols, stage_only=False):
+    """Statusline lines per frame; optionally just the stage rows."""
     got, out = [], 1000
     for i in range(n):
         out += out_step
-        env = dict(os.environ, HOME=home, COLUMNS=str(COLS),
+        env = dict(os.environ, HOME=home, COLUMNS=str(cols),
                    STATUSLINE_NOW=str(sp.BASE + i // per_second))
         p = subprocess.run([sp.SL], input=payload(sid, out).encode(),
                            capture_output=True, env=env)
-        got.append(p.stdout.decode("utf-8", "replace").split("\n"))
+        lines = p.stdout.decode("utf-8", "replace").split("\n")
+        got.append(sp.stage(lines) if stage_only else lines)
     return got
 
 
-def render(fr, path, ms):
+def render(fr, path, ms, cols, crop=None, size=None, pad=8):
+    """Paint frames. crop=None trims to the widest painted column; an int is
+    a fixed cell window (stable framing while the cat travels). size scales
+    the cell grid; the default is stage-preview's own."""
     from PIL import Image, ImageDraw, ImageFont
     have = _covered(sp.FONT)
-    alt = ImageFont.truetype(FALLBACK, sp.SIZE)
+    if size is None:
+        fnt_main, cw, ch, fsz = sp.font, sp.CW, sp.CH, sp.SIZE
+    else:
+        fnt_main = ImageFont.truetype(sp.FONT, size)
+        cw, ch, fsz = fnt_main.getlength("M"), int(size * 1.42), size
+    alt = ImageFont.truetype(FALLBACK, fsz)
 
     rows = max(len(f) for f in fr)
-    # Crop to the widest column any frame actually paints, so the banner has no
-    # dead right-hand margin.
-    used = max((c + 1) for f in fr for r in f
-               for c, (ch, _) in enumerate(sp.cells(r)[:COLS]) if ch != " ")
-    W = int(sp.CW * used) + 16
-    H = sp.CH * rows + 16
+    if crop is None:
+        crop = max((c + 1) for f in fr for r in f
+                   for c, (chr_, _) in enumerate(sp.cells(r)[:cols])
+                   if chr_ != " ")
+    W = int(cw * crop) + 2 * pad
+    H = ch * rows + 2 * pad
     imgs = []
     for f in fr:
         im = Image.new("RGB", (W, H), sp.GROUND)
         d = ImageDraw.Draw(im)
         for r, line in enumerate(f):
-            for c, (ch, col) in enumerate(sp.cells(line)[:COLS]):
-                if ch == " ":
+            for c, (chr_, col) in enumerate(sp.cells(line)[:crop]):
+                if chr_ == " ":
                     continue
-                fnt = sp.font if ord(ch) in have else alt
-                d.text((8 + c * sp.CW, 8 + r * sp.CH), ch, font=fnt, fill=col)
+                fnt = fnt_main if ord(chr_) in have else alt
+                d.text((pad + c * cw, pad + r * ch), chr_, font=fnt, fill=col)
         imgs.append(im)
     imgs[0].save(path, save_all=True, append_images=imgs[1:], duration=ms,
                  loop=0, optimize=True)
@@ -112,12 +129,19 @@ def render(fr, path, ms):
 if __name__ == "__main__":
     out = HERE / "docs" / "media"
     out.mkdir(parents=True, exist_ok=True)
+    # (name, sid, frames, renders/s, out_step, ms, cols, stage_only, crop, size)
     jobs = [
-        ("00-banner",  "bnrWork", 90, 3, 420, 333),   # working: 3 renders a second
-        ("07-cat-idle", "bnrIdle", 60, 1,   0, 1000),  # quiet: one render a second
-        ("08-cat-busy", "bnrBusy", 60, 3, 420, 333),
+        # the logo: a 45-column pane clamps the yard to its minimum
+        ("00-banner", "bnrLogo", 90, 3, 420, 333, 45, True, 20, 52),
+        # the full strip, for the statusline section
+        ("statusline-live", "bnrWork", 90, 3, 420, 333, 128, False, None, None),
+        # the pair: stage only, half-strip crop, real tempos
+        ("07-cat-idle", "bnrIdle", 60, 1, 0, 1000, 118, True, 52, None),
+        ("08-cat-busy", "bnrBusy", 60, 3, 420, 333, 118, True, 52, None),
     ]
-    home = _sandbox_home()
-    for name, sid, n, per_s, step, ms in jobs:
+    for name, sid, n, per_s, step, ms, cols, st, crop, size in jobs:
+        home = _sandbox_home()
         p = out / f"{name}.gif"
-        print(name, render(frames(sid, n, per_s, step, home), p, ms), "->", p)
+        fr = frames(sid, n, per_s, step, home, cols, stage_only=st)
+        print(name, render(fr, p, ms, cols, crop=crop, size=size, pad=24
+                           if size else 8), "->", p)

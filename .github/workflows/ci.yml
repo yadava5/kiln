@@ -59,7 +59,11 @@ jobs:
       # image renders as a grey box and nobody who wrote it ever sees it.
       - name: README media resolve
         run: |
-          grep -oE '\]\(docs/media/[^)]+\)' README.md | tr -d '](' | sed 's/)$//' | sort -u > /tmp/refs
+          # Both forms: markdown ](docs/media/x) AND raw <img src="docs/media/x">.
+          # The banner is centred with an <img> tag, so a markdown-only grep
+          # would silently stop covering it.
+          grep -oE '(\]\(|src=")docs/media/[^)"]+' README.md \
+            | sed 's/^\](//; s/^src="//' | sort -u > /tmp/refs
           test -s /tmp/refs || { echo "::error::no media refs found in README"; exit 1; }
           missing=0
           while read -r p; do
