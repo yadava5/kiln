@@ -1,5 +1,9 @@
 # Change plan — 2026-08-22
 
+**Outcome:** items 2, 4, 5, 6, 7 and 8 are APPLIED and verified. Item 1 stays
+DEFERRED (needs a kitty quit). Item 3 is NOT DONE — the mechanism it assumed
+does not work as written; see the note at the foot of this file.
+
 Eight items were proposed. **#1 is deferred**: kitty 0.48.2 needs a full quit and
 Ayush is working in a live tab. Everything below is edit-only. Nothing here
 reloads kitty, restarts anything, or kills a process.
@@ -125,3 +129,36 @@ layout is what makes that upgrade cheap.
 - `startup_session` — that changes launch behaviour and deserves its own call.
 - Adding a `tools:` key to stig — see #3.
 - Any change to hook matching logic, agent routing, or model pins.
+
+
+---
+
+## Item 3 postscript — why it is not done
+
+`disallowedTools` does **not** accept individual MCP tool names. The entry
+`mcp__supabase__execute_sql` is valid YAML, looks correct, and is silently
+ignored: with it in place a spawned stig discovered that tool and ran
+`SELECT 1` against a live Postgres. A guard that cannot fail is the defect this
+repo's own Decisions section warns about, so it was reverted rather than kept.
+
+The documented form is server granularity — `mcp__supabase`,
+`mcp__supabase__*`, `mcp__*` — and that form was observed working once: a
+spawned stig reported its own tool access as
+`All tools except Write, Edit, NotebookEdit, mcp__supabase, mcp__supabase-applied`
+with every Supabase tool absent from its registry. A later spawn, after the
+entry had been removed and re-added, saw them present again.
+
+So the config in `claude/agents/stig.md` is the documented correct form, but
+**propagation within a running session is unreliable**, and it must be
+re-verified from a fresh Claude Code session before being treated as enforced.
+Until then, assume stig can still reach both Supabase servers.
+
+Two things learned that are worth more than the item itself:
+
+* `disallowedTools` IS mechanical for built-in tool names, and the block
+  propagates into nested agents — spawning `minion` from inside `stig` does not
+  restore `Write`.
+* A `PreToolUse` hook in agent frontmatter genuinely fires: `picasso` was
+  blocked before `npm` ran, by `frontend-no-suites.sh`, at the PreToolUse stage.
+  The README's claim that the suite gate is mechanical is therefore true, and
+  now measured rather than asserted.
