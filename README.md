@@ -6,8 +6,8 @@ them](docs/media/00-banner.gif)
 
 A kitty terminal built around long Claude Code sessions, and the Claude Code
 configuration that lives inside it. Warm dark palette, a real topographic map
-of Oxford, Ohio behind the text, a bottom tab bar, and a statusline that walks
-a cat across it while Claude works.
+of Oxford, Ohio behind the text, a bottom tab bar, and a statusline with a cat
+that hops across it while Claude works.
 
 macOS, Apple Silicon, kitty 0.46.2, JetBrains Mono Nerd Font at 14pt.
 
@@ -159,7 +159,7 @@ roughly 3 fps while Claude works, which is the right way round.
 
 | idle | working |
 | --- | --- |
-| ![the cat sitting and grooming](docs/media/07-cat-idle.gif) | ![the cat walking and running](docs/media/08-cat-busy.gif) |
+| ![the statusline at one render a second: the cat mostly still, blinking and settling between hops](docs/media/07-cat-idle.gif) | ![the same statusline at about three renders a second: the cat hopping across the stage](docs/media/08-cat-busy.gif) |
 
 Sub-second refresh is rejected and fails open loop: `0.5` is below the schema
 minimum, gets silently discarded, and no timer is armed at all. Those same
