@@ -1,0 +1,50 @@
+#!/bin/zsh
+# kitty-theme — switch kitty's active theme.
+#
+# Convention (themes/README.md): each theme is a self-contained
+# themes/<name>.conf; this script copies the chosen one over
+# current-theme.conf, which kitty.conf includes LAST so its values win.
+#
+# Inside a kitty that exposes its control socket (allow_remote_control
+# socket-only + listen_on, i.e. any window started after a full kitty
+# restart) the palette is applied to every window instantly via
+# `kitten @ set-colors`. Otherwise: ctrl+cmd+, reloads, or open a new window.
+#
+# Usage:
+#   kitty-theme            list themes, mark the active one
+#   kitty-theme <name>     activate themes/<name>.conf
+
+emulate -L zsh
+setopt err_exit no_unset pipefail
+
+kdir="${0:A:h}"
+themes="$kdir/themes"
+current="$kdir/current-theme.conf"
+
+if (( $# == 0 )); then
+  for name in "$themes"/*.conf(N:t:r); do
+    if /usr/bin/cmp -s "$themes/$name.conf" "$current"; then
+      print -r -- "* $name"
+    else
+      print -r -- "  $name"
+    fi
+  done
+  exit 0
+fi
+
+name="${1%.conf}"
+src="$themes/$name.conf"
+if [[ ! -f "$src" ]]; then
+  print -ru2 -- "kitty-theme: no such theme: $name (looked in $themes)"
+  exit 1
+fi
+
+/bin/cp -f "$src" "$current"
+
+if [[ -n "${KITTY_LISTEN_ON:-}" ]] && command -v kitten >/dev/null 2>&1; then
+  if kitten @ set-colors --all --configured "$current" 2>/dev/null; then
+    print -r -- "kitty-theme: $name applied live (all windows)"
+    exit 0
+  fi
+fi
+print -r -- "kitty-theme: $name staged — press ctrl+cmd+, in kitty (or open a new window)"

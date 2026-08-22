@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The colour math, against published reference values. Stdlib only.
+      - name: palmath self-check
+        run: python3 claude/scripts/palmath.py
+
+      # The palette audit. Exits nonzero if any of the fifteen gates stops passing.
+      - name: kiln palette audit
+        run: python3 claude/scripts/kitty-palcheck.py kitty/themes/kiln.conf
+
+      # Negative control: the audit must FAIL on a theme that deserves to fail.
+      # A gate nobody has watched fail is not a gate.
+      - name: palette audit rejects a bad theme
+        run: |
+          sed 's|^foreground .*|foreground #2a2320|' kitty/themes/kiln.conf > /tmp/bad.conf
+          if python3 claude/scripts/kitty-palcheck.py /tmp/bad.conf; then
+            echo "::error::palcheck passed a theme with 1.2:1 foreground contrast"
+            exit 1
+          fi
+          echo "ok: rejected as expected"
+
+      - name: python syntax
+        run: |
+          python3 -m py_compile kitty/tab_bar.py kitty/kitty-cats kitty/kitty-keys \
+                                kitty/check-art kitty/backgrounds/*.py \
+                                claude/scripts/*.py
+
+      - name: shell syntax
+        run: |
+          for f in install.sh tools/check-sync.sh claude/*.sh claude/hooks/*.sh; do
+            bash -n "$f" && echo "ok  $f"
+          done
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -S error install.sh tools/check-sync.sh claude/hooks/*.sh
+
+      # Every image the README points at must exist. A README with a broken
+      # image renders as a grey box and nobody who wrote it ever sees it.
+      - name: README media resolve
+        run: |
+          grep -oE '\]\(docs/media/[^)]+\)' README.md | tr -d '](' | sed 's/)$//' | sort -u > /tmp/refs
+          test -s /tmp/refs || { echo "::error::no media refs found in README"; exit 1; }
+          missing=0
+          while read -r p; do
+            if [ -f "$p" ]; then echo "ok      $p"; else echo "MISSING $p"; missing=1; fi
+          done < /tmp/refs
+          [ "$missing" = 0 ] || { echo "::error::README points at media that is not in the repo"; exit 1; }
+
+      # The four files that legitimately carry an absolute home path are known.
+      # Any OTHER file gaining one means install.sh will not rewrite it.
+      - name: no stray absolute home paths
+        run: |
+          # install.sh carries the literal because it is what does the rewriting.
+          stray=$(grep -rl "/Users/ayush" kitty claude tools install.sh 2>/dev/null |
+                  grep -vE '^(install\.sh|kitty/(kitty\.conf|kitty-keys|check-art|tab_bar\.py))$' || true)
+          if [ -n "$stray" ]; then
+            echo "::error::absolute home path in files install.sh does not rewrite:"
+            echo "$stray"
+            exit 1
+          fi
+          echo "ok: only the four known files"

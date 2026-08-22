@@ -1,0 +1,10 @@
+# Regenerable elevation tile cache — oxford-topo-gen.py refetches it.
+kitty/backgrounds/tiles/
+
+# Backups the installer and kitty itself leave behind.
+*.bak-*
+*.pre-kiln-*
+
+.DS_Store
+__pycache__/
+*.pyc

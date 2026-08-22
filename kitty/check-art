@@ -1,0 +1,90 @@
+#!/usr/bin/python3
+"""Shape candidate terminal art against the LIVE font and report ligatures.
+
+Why this exists: JetBrains Mono ligates aggressively, and a ligature does NOT
+change the cell count — so a width check can never catch one. The classic
+`=^.^=` cat face loses its right cheek because `^=` shapes to a single
+`asciicircum_equal.liga` glyph. This was found by screenshot twice before
+anyone thought to shape the art; do not ship art that has not been through
+here.
+
+    ~/.config/kitty/check-art '  /\\_/\\' ' ( o.o )'
+    ~/.config/kitty/check-art --file art.txt
+
+A line is CLEAN when HarfBuzz emits exactly one glyph per character and every
+advance equals the mono advance (600). Anything else is reported with the
+offending cluster named.
+"""
+import subprocess
+import sys
+
+FONT = '/Users/ayush/Library/Fonts/JetBrainsMonoNerdFontMono-Regular.ttf'
+MONO_ADVANCE = 600
+HB = '/opt/homebrew/bin/hb-shape'
+
+R, G, Y, D = '\033[0m', '\033[32m', '\033[33m', '\033[2m'
+
+
+def shape(text):
+    """[(glyph_name, advance, cluster)] for one line of art."""
+    out = subprocess.run(
+        [HB, '--output-format=json', '--show-extents', FONT, text],
+        capture_output=True, text=True, check=True).stdout
+    import json
+    return [(g['g'], g.get('ax', 0), g.get('cl', 0)) for g in json.loads(out)]
+
+
+def check(text):
+    """A cell-count check can NEVER catch a ligature in this font — that is the
+    whole trap. JetBrains Mono is monospaced, so it renders a ligature as one
+    glyph PER CELL: the leading character is replaced by a blank spacer glyph
+    named `SPC`, and the final character carries the combined `*.liga` glyph.
+
+        '=^.^='  ->  equal | asciicircum | period | SPC | asciicircum_equal.liga
+
+    Five characters, five glyphs, five cells — and the third `^` has silently
+    become whitespace on screen. So the real tests are: did any character turn
+    into `SPC` without being a space, and did any glyph come back as `.liga`.
+    """
+    if not text:
+        return True, []
+    glyphs = shape(text)
+    problems = []
+    for name, ax, cl in glyphs:
+        ch = text[cl:cl + 1]
+        if name == 'SPC' and ch != ' ':
+            problems.append('SWALLOWED %r at col %d became a blank spacer'
+                            % (ch, cl))
+        elif name.endswith('.liga'):
+            problems.append('LIGATURE %r at col %d -> %s (absorbs the cell '
+                            'before it)' % (ch, cl, name))
+        if ax != MONO_ADVANCE:
+            problems.append('ADVANCE %r (%s) = %d, want %d'
+                            % (ch, name, ax, MONO_ADVANCE))
+        if name in ('.notdef', 'gid0'):
+            problems.append('MISSING GLYPH %r — not in the font' % ch)
+    return not problems, problems
+
+
+def main():
+    args = sys.argv[1:]
+    if args and args[0] == '--file':
+        lines = open(args[1], encoding='utf-8').read().split('\n')
+    else:
+        lines = args
+    ok_all = True
+    width = max((len(x) for x in lines), default=0)
+    for line in lines:
+        ok, problems = check(line)
+        ok_all &= ok
+        mark = f'{G}CLEAN{R}' if ok else f'{Y}DIRTY{R}'
+        print(f'  {mark}  |{line:<{width}}|  {D}{len(line)} cells{R}')
+        for p in problems:
+            print(f'         {Y}{p}{R}')
+    print()
+    print('  all clean' if ok_all else '  FIX THE DIRTY LINES BEFORE SHIPPING')
+    return 0 if ok_all else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

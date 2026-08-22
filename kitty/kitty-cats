@@ -1,0 +1,154 @@
+#!/usr/bin/python3
+"""kitty-cats — every cat this setup can actually draw, weighed, at real size.
+
+Run it in kitty:  ~/.config/kitty/kitty-cats
+
+The point of this file is that the choice of cat is a choice of SURFACE, not a
+choice of drawing. Judge these as rendered pixels in your own terminal at your
+own font — that is the only test that has ever been right in this project.
+"""
+import sys
+
+R, B, D = '\033[0m', '\033[1m', '\033[2m'
+
+
+def c(n):
+    return f'\033[38;5;{n}m'
+
+
+AMBER, CREAM, GREY, WHITE, GREEN, RED = c(215), c(223), c(244), c(255), c(108), c(174)
+
+
+def head(t, sub=''):
+    print(f'\n{AMBER}{B}{t}{R}  {D}{sub}{R}')
+    print(f'{GREY}{"─" * 74}{R}')
+
+
+def verdict(ok, txt):
+    mark = f'{GREEN}✓{R}' if ok else f'{RED}✗{R}'
+    print(f'   {mark} {D}{txt}{R}')
+
+
+print(f'\n{B}{WHITE}  TERMINAL CATS — what this setup can draw, and where{R}')
+print(f'{D}  Every claim below was verified by rendering it, not by reading docs.{R}')
+
+# ── the chosen one ────────────────────────────────────────────────────────
+head('IN USE · 4 rows in the Claude Code statusline',
+     'a full-width stage under your text entry')
+POSES = [
+    ((' /\\_/\\ ', '( o.o )', ' > ^ <  '), 'calm+busy'),
+    (('       ', ' /\\_/\\ ', '(=-.-=) '), 'calm+idle'),
+    ((' /\\_/\\ ', '( o.O )', ' > ^ <  '), '50-79 busy'),
+    ((' /\\_/\\ ', '( -.- )', ' > ^ <  '), '50-79 idle'),
+    (('!/\\_/\\!', '( O.O )', ' > o <  '), '80+ busy'),
+    ((' /\\_/\\ ', '( o_o )', ' > ~ <  '), '80+ idle'),
+]
+print(f'  {D}ANIMATED, as of 2026-08-09. This file used to say the opposite,{R}')
+print(f'  {D}on the strength of a real measurement (gaps of 1s to 34s) taken{R}')
+print(f'  {D}while settings.json carried "refreshInterval": 0.5 — below the{R}')
+print(f'  {D}schema minimum of 1, and silently discarded, so no timer was{R}')
+print(f'  {D}ever armed. At 1 it ticks every second and stacks on top of{R}')
+print(f'  {D}event-driven renders: ~1 fps idle, ~3 fps while Claude works.{R}')
+print(f'  {D}The cat walks a stage as wide as the pane and moves in 2D.{R}')
+print(f'  {D}The INSTRUMENTS are still pure functions of state — a number{R}')
+print(f'  {D}may sit on screen for a full second and must still be true.{R}\n')
+for i in range(0, len(POSES), 4):
+    chunk = POSES[i:i + 4]
+    for r in range(3):
+        line = '   '
+        for (rows, _) in chunk:
+            line += f'{CREAM}{rows[r]:<9}{R}   '
+        print(line)
+    line = '   '
+    for (_, lbl) in chunk:
+        line += f'{GREY}{lbl:<9}{R}   '
+    print(line + '\n')
+verdict(True, 'multi-row, real characters, same pane, no extra window')
+verdict(True, 'animates: 30 screenshots 1s apart gave 30 distinct pixel')
+verdict(True, '  signatures, longest freeze 1s. File hashes are useless for')
+verdict(True, '  this — ImageMagick stamps a date into every PNG it writes.')
+verdict(False, 'NOT free any more: 21 ms per render x 1 Hz PER OPEN SESSION,')
+verdict(False, '  about 2% of one core each. The tab-bar cat it replaced cost')
+verdict(False, '  0.50% total. Knobs: refreshInterval 2 halves it, STAGE_ROWS=0')
+verdict(False, '  in statusline.sh removes the cat and leaves the instruments.')
+
+# ── alternative bodies ────────────────────────────────────────────────────
+head('ALTERNATIVE 3-ROW BODIES', 'drop-in swaps for the poses above')
+for rows, name in (
+    ((' /\\_/\\ ', '( o.o )', ' > ^ <  '), 'classic   — in use'),
+    (('|\\---/|', '| o_o |', ' \\_^_/  '), 'boxed     — heavier line, good on dark'),
+    (('  /\\_/\\', ' ( ^.^ )', '  U   U '), 'paws      — front paws showing'),
+    ((' ╱|、   ', '(˚ˎ 。7 ', ' |、˜〵  '), 'sitting   — most cat-like, needs Unicode'),
+):
+    for r in rows:
+        print(f'   {CREAM}{r}{R}')
+    print(f'   {GREY}{name}{R}\n')
+
+# ── one row ───────────────────────────────────────────────────────────────
+head('ONE ROW ONLY', 'all that fits a HORIZONTAL kitty tab bar')
+for art, note in (
+    ('≽^•⩊•^≼', 'best one-row face — ears, eyes, mouth'),
+    ('=^･ω･^=', 'classic kaomoji'),
+    ('ᓚᘏᗢ', 'syllabics: a whole crouching body in 3 cells'),
+    ('ฅ^•ﻌ•^ฅ', 'with raised paws'),
+    ('\U000f011b', 'Nerd Font glyph — a drawn cat in ONE cell'),
+    ('\U0001FB0F\U0001FB2F', 'sextant pixels — the removed blob, for comparison'),
+):
+    print(f'   {CREAM}{art:<12}{R} {D}{note}{R}')
+print()
+verdict(False, 'NO LONGER IN USE. tab_bar_style is `separator` now and the')
+verdict(False, '  cat lives in the statusline. tab_bar.py is kept on disk for')
+verdict(False, '  the vertical bar below, not loaded.')
+verdict(False, 'EXACTLY one row in 0.46.2 — kitty/tab_bar.py builds the bar as')
+verdict(False, '  Screen(None, 1, ...) and calls s.resize(1, ncells). No option')
+verdict(False, '  adds a row; tab_bar_margin_height is blank pts, not rows.')
+print()
+head('VERTICAL TAB BAR · the big canvas, one upgrade away',
+     'kitty 0.48.0+, NOT available on the 0.46.2 installed here')
+print(f'   {D}0.48 added `tab_bar_edge left|right`, and the vertical bar is{R}')
+print(f'   {D}built as s.resize(nlines, ncols) — a REAL multi-row Screen,{R}')
+print(f'   {D}~28 cols x the full window height, and a custom draw_tab may{R}')
+print(f'   {D}set screen.cursor.y to any row in it. That is two orders of{R}')
+print(f'   {D}magnitude more cells than the strip above.{R}\n')
+print(f'   {D}Upgrade:  brew upgrade --cask kitty   (needs kitty quit){R}')
+print(f'   {D}Two porting notes, from the 0.48.2 source:{R}')
+print(f'   {D}  * vertical mode calls draw_tab with is_last=True for EVERY{R}')
+print(f'   {D}    tab (tab_bar.py:958) — tab_bar.py gates the cat on that.{R}')
+print(f'   {D}  * ExtraData is rebuilt per call, so prev_tab / next_tab are{R}')
+print(f'   {D}    always None and there is no for_layout dry run.{R}')
+print()
+print(f'   {D}Shipped face set (tail-free, all HarfBuzz-verified 1 glyph/cell):{R}')
+print(f'   {CREAM}=o.o=  =-.-=  =O.O=  =u.u=  =uωu=  =^.o=  =-_-=  =@.@={R}')
+print(f'   {D}Beware: `^=` LIGATES in JetBrainsMono, so the classic{R}')
+print(f'   {D}`=^･ω･^=` is unusable here — and its `･` is not in the font{R}')
+print(f'   {D}at all (.notdef). Shape art with hb-shape before trusting it.{R}')
+
+# ── rejected ──────────────────────────────────────────────────────────────
+head('REJECTED SURFACES', 'all tested, none guessed')
+for name, why, ok in (
+    ('kitten panel, floating',
+     'DEAD END, and now for a hard reason rather than a taste one: '
+     'kitty never wires up GLFW_MOUSE_PASSTHROUGH (defined in glfw3.h, '
+     'zero references in kitty/glfw.c), so there is no click-through '
+     'at any layer. A --layer=overlay panel sits at NSWindow level 100 '
+     '— above the menu bar — and would eat every mouse event on the '
+     'screen. Not fixable from config.', False),
+    ('dedicated split pane',
+     'WORKS — real rows, any framerate. Rejected: steals pane space '
+     'and is in the way while working.', False),
+    ('window logo PNG',
+     'WORKS — full-resolution image per window, swappable live over '
+     'remote control, sits behind text without hurting legibility. '
+     'Rejected: it is an illustration, not terminal characters.', False),
+    ('background image',
+     'WORKS but is static, and text over a busy region is the exact '
+     'thing that made the old keymap wall unreadable.', False),
+):
+    print(f'   {GREY}{name}{R}')
+    verdict(ok, why)
+    print()
+
+print(f'{D}  To change the cat: edit the poses section of '
+      f'~/.claude/statusline.sh{R}')
+print(f'{D}  To resize its stage: STAGE_ROWS / CAT_H / CAT_W at the top of '
+      f'the same file{R}\n')

@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Coffee & Poppies — kitty's decorative background. 2026-08-08.
+
+     PURELY decorative, by hard-won rule: no words, no keys, no labels.
+     (Three text-bearing walls failed here; shapes survive being overdrawn
+     by terminal text, words never do. See kitty.conf, Background image.)
+
+     Ground is the Kiln theme background #1c1613 exactly, so the image is
+     seamless with cell backgrounds and padding. Every element is darker
+     than any text tone the theme emits; the brightest paint here is the
+     one open poppy at #b23d28 — measured against the theme before
+     shipping (foreground #f0e5d1 on it: 4.9:1 WCAG; see report).
+
+     Composition: coffee lives low-left (double mug ring, scattered beans,
+     steam rising); a stand of poppies grows up the right edge — two
+     closed cups, one bright open bloom, a nodding bud, a seed pod; a few
+     seeds drift off on the wind toward the middle. Bottom-right, in
+     near-background tone, the tab-bar cat's silhouette sits watching the
+     flowers: same ears, same sloped back, forty times the size.
+
+     Render: rsvg-convert -w 3024 -h 1964 -o coffee-poppies.png coffee-poppies.svg
+     (feTurbulence grain verified working in rsvg-convert 2.62.1.)     -->
+<svg width="3024" height="1964" viewBox="0 0 3024 1964"
+     xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <!-- lamplight: a soft warm pool low-left, where the coffee sits -->
+    <radialGradient id="lamp" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0"   stop-color="#291d13" stop-opacity="0.9"/>
+      <stop offset="0.6" stop-color="#241a12" stop-opacity="0.5"/>
+      <stop offset="1"   stop-color="#241a12" stop-opacity="0"/>
+    </radialGradient>
+    <!-- vignette seats the corners -->
+    <radialGradient id="vig" cx="0.5" cy="0.45" r="0.75">
+      <stop offset="0"    stop-color="#0f0b08" stop-opacity="0"/>
+      <stop offset="0.62" stop-color="#0f0b08" stop-opacity="0"/>
+      <stop offset="1"    stop-color="#0f0b08" stop-opacity="0.5"/>
+    </radialGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+    <filter id="softer" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <!-- warm paper grain; alpha only, so it tints rather than lightens -->
+    <filter id="grain">
+      <feTurbulence type="fractalNoise" baseFrequency="0.8"
+                    numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix values="0 0 0 0 0.85
+                             0 0 0 0 0.66
+                             0 0 0 0 0.36
+                             0 0 0 0.05 0"/>
+    </filter>
+  </defs>
+
+  <!-- ground -->
+  <rect width="3024" height="1964" fill="#1c1613"/>
+  <ellipse cx="700" cy="1750" rx="1250" ry="900" fill="url(#lamp)"/>
+
+  <!-- ── coffee, low-left ─────────────────────────────────────────── -->
+  <!-- the double ring a mug leaves when it is set down twice -->
+  <g fill="none" stroke-linecap="round">
+    <circle cx="640" cy="1560" r="320" stroke="#3c2b1d" stroke-width="24"
+            opacity="0.5" stroke-dasharray="640 120 340 160 520 90"
+            transform="rotate(-35 640 1560)"/>
+    <circle cx="668" cy="1584" r="296" stroke="#34251a" stroke-width="13"
+            opacity="0.38" stroke-dasharray="410 200 700 150"
+            transform="rotate(105 668 1584)"/>
+    <!-- a fainter old stain top-left, mostly under the first paragraphs -->
+    <circle cx="330" cy="300" r="215" stroke="#31231a" stroke-width="16"
+            opacity="0.34" stroke-dasharray="300 170 520 120"
+            transform="rotate(60 330 300)"/>
+    <!-- and one low-center, where the input box usually sits anyway -->
+    <circle cx="1850" cy="1810" r="255" stroke="#33251a" stroke-width="18"
+            opacity="0.32" stroke-dasharray="560 180 300 220"
+            transform="rotate(-80 1850 1810)"/>
+  </g>
+
+  <!-- steam: three strands off an implied cup below the frame -->
+  <g fill="none" stroke-linecap="round" filter="url(#soft)">
+    <path d="M600,1240 C520,1080 700,960 620,800 C550,660 690,540 640,400
+             C610,320 650,260 630,210"
+          stroke="#59452e" stroke-width="9" opacity="0.30"/>
+    <path d="M700,1270 C660,1130 790,1030 740,880 C700,760 810,650 780,520
+             C755,430 800,360 790,300"
+          stroke="#4e3c28" stroke-width="7" opacity="0.26"/>
+    <path d="M510,1200 C470,1090 560,1010 520,890 C490,790 560,700 540,610"
+          stroke="#463625" stroke-width="6" opacity="0.20"/>
+  </g>
+
+  <!-- beans by the ring; the crease is the ground colour showing through -->
+  <g>
+    <g transform="translate(990,1700) rotate(24)">
+      <ellipse rx="36" ry="23" fill="#3a2b1e"/>
+      <path d="M-30,0 Q0,14 30,0" stroke="#1c1613" stroke-width="7"
+            fill="none" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(1130,1590) rotate(-38)">
+      <ellipse rx="33" ry="21" fill="#372a1d"/>
+      <path d="M-27,0 Q0,12 27,0" stroke="#1c1613" stroke-width="6"
+            fill="none" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(880,1830) rotate(75)">
+      <ellipse rx="34" ry="22" fill="#3c2c1e"/>
+      <path d="M-28,0 Q0,13 28,0" stroke="#1c1613" stroke-width="6"
+            fill="none" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(1350,1770) rotate(-8)">
+      <ellipse rx="31" ry="20" fill="#352818"/>
+      <path d="M-25,0 Q0,11 25,0" stroke="#1c1613" stroke-width="6"
+            fill="none" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <!-- ── poppies up the right edge ─────────────────────────────────── -->
+  <!-- stems and leaves first: dark olive, quiet -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M2620,1964 C2600,1600 2640,1100 2565,560"
+          stroke="#333d24" stroke-width="11"/>
+    <path d="M2450,1964 C2470,1650 2400,1200 2385,910"
+          stroke="#2e3720" stroke-width="10"/>
+    <path d="M2760,1964 C2770,1700 2800,1350 2805,1065"
+          stroke="#2e3720" stroke-width="10"/>
+    <path d="M2320,1964 C2330,1700 2280,1420 2262,1290"
+          stroke="#2b3320" stroke-width="9"/>
+    <path d="M2880,1964 C2890,1780 2900,1520 2902,1385"
+          stroke="#2b3320" stroke-width="8"/>
+    <!-- slender leaf blades -->
+    <path d="M2610,1750 C2500,1660 2450,1560 2430,1440"
+          stroke="#2e3620" stroke-width="14" opacity="0.85"/>
+    <path d="M2770,1820 C2860,1740 2905,1650 2925,1560"
+          stroke="#2b3320" stroke-width="12" opacity="0.8"/>
+    <path d="M2455,1830 C2380,1780 2340,1700 2325,1620"
+          stroke="#293120" stroke-width="11" opacity="0.8"/>
+  </g>
+
+  <!-- the bright one, open to the sky: five petals round a dark heart.
+       Brightest paint on the canvas — sized to sit under a dozen glyphs,
+       never under a paragraph. -->
+  <g transform="translate(2560,520)">
+    <g fill="#a83a26">
+      <ellipse rx="62" ry="88" transform="rotate(0)   translate(0,-62)"/>
+      <ellipse rx="62" ry="88" transform="rotate(72)  translate(0,-62)"/>
+      <ellipse rx="62" ry="88" transform="rotate(144) translate(0,-62)"/>
+      <ellipse rx="62" ry="88" transform="rotate(216) translate(0,-62)"/>
+      <ellipse rx="62" ry="88" transform="rotate(288) translate(0,-62)"/>
+    </g>
+    <circle r="34" fill="#241812"/>
+    <g fill="#3c2c1e">
+      <circle r="6" cx="0"   cy="-44"/>
+      <circle r="6" cx="42"  cy="-14"/>
+      <circle r="6" cx="26"  cy="36"/>
+      <circle r="6" cx="-26" cy="36"/>
+      <circle r="6" cx="-42" cy="-14"/>
+    </g>
+  </g>
+
+  <!-- two closed cups, heads nodding -->
+  <g transform="translate(2385,910) rotate(-8)">
+    <path d="M-105,-20 C-110,-75 -60,-118 -38,-98 C-20,-130 20,-130 38,-98
+             C60,-118 110,-75 105,-20 C95,40 -95,40 -105,-20 Z"
+          fill="#7a2c1e"/>
+    <path d="M-58,-96 C-40,-116 40,-116 58,-96 C50,-60 -50,-60 -58,-96 Z"
+          fill="#61231a" opacity="0.8"/>
+  </g>
+  <g transform="translate(2805,1065) rotate(7)">
+    <path d="M-95,-16 C-100,-66 -55,-105 -34,-88 C-18,-116 18,-116 34,-88
+             C55,-105 100,-66 95,-16 C86,36 -86,36 -95,-16 Z"
+          fill="#63241a"/>
+  </g>
+
+  <!-- the bud, still nodding toward the ground -->
+  <g transform="translate(2262,1290) rotate(-125)">
+    <ellipse rx="52" ry="33" fill="#54271c"/>
+    <path d="M-40,-12 Q0,-40 40,-12" stroke="#3a2016" stroke-width="8"
+          fill="none" stroke-linecap="round"/>
+  </g>
+
+  <!-- the seed pod that already lost its petals -->
+  <g transform="translate(2902,1385)">
+    <circle r="30" fill="#46362a"/>
+    <ellipse rx="34" ry="10" cy="-26" fill="#544231"/>
+  </g>
+
+  <!-- seeds on the wind, drifting toward the middle of the room -->
+  <g fill="#4a382a">
+    <circle cx="2330" cy="700" r="8"  opacity="0.55"/>
+    <circle cx="2180" cy="620" r="6"  opacity="0.45"/>
+    <circle cx="2040" cy="560" r="7"  opacity="0.5"/>
+    <circle cx="1880" cy="530" r="5"  opacity="0.4"/>
+    <circle cx="1730" cy="470" r="6"  opacity="0.45"/>
+    <circle cx="1560" cy="450" r="4"  opacity="0.35"/>
+    <circle cx="1420" cy="410" r="5"  opacity="0.3"/>
+  </g>
+
+  <!-- The pixel cat that used to sit here was REMOVED 2026-08-08, together
+       with the tab-bar cat it was a scaled-up copy of. Blown up ~40x it read
+       as a blocky grey staircase rather than an animal — the same failure as
+       in the tab bar, just larger. Ayush's verdict on the shape: "remove this
+       completely as this look ass".
+
+       The cat now lives in the Claude Code statusline as three rows of
+       ordinary characters, which is the first surface in this setup with
+       enough rows to draw one. This image is deliberately wordless and
+       creatureless: coffee and poppies only. -->
+
+  <!-- vignette above the shapes, grain above everything -->
+  <rect width="3024" height="1964" fill="url(#vig)"/>
+  <rect width="3024" height="1964" filter="url(#grain)" opacity="0.85"/>
+</svg>
