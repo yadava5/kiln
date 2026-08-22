@@ -38,6 +38,23 @@ jobs:
           fi
           echo "ok: rejected as expected"
 
+      # A backslash in a map action is eaten by kitty's argv splitter unless it
+      # is single-quoted. The config still LOADS, so nothing else here can see
+      # it; two bindings shipped broken this way on 2026-08-22.
+      - name: map actions keep their backslashes
+        run: python3 tools/check-map-escapes.py kitty/kitty.conf
+
+      # Negative control: the gate must reject the exact line that shipped broken.
+      - name: backslash gate rejects the unquoted form
+        run: |
+          sed "s|--regex '(?m)|--regex (?m)|; s|mdx)\\\\b'|mdx)\\\\b|" kitty/kitty.conf > /tmp/bad-map.conf
+          grep -q -- "--regex (?m)" /tmp/bad-map.conf || { echo "::error::control did not unquote anything"; exit 1; }
+          if python3 tools/check-map-escapes.py /tmp/bad-map.conf; then
+            echo "::error::gate passed a map line kitty would break"
+            exit 1
+          fi
+          echo "ok: rejected as expected"
+
       - name: python syntax
         run: |
           python3 -m py_compile kitty/tab_bar.py kitty/kitty-cats kitty/kitty-keys \

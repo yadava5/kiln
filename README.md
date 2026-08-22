@@ -129,6 +129,11 @@ Five worth calling out for Claude Code work:
 `shift+enter` is deliberately **not** mapped: a `send_text` map would hand the
 app a bare `\n`, which many TUIs read as submit.
 
+Every one of these was run against a live kitty and read back from a measured
+quantity — layout name, column counts, screen text — not from looking at it.
+Two shipped broken and are fixed; the sweep, the instrument and what it caught
+are in [docs/BINDING-VERIFICATION.md](docs/BINDING-VERIFICATION.md).
+
 ---
 
 ## The statusline
