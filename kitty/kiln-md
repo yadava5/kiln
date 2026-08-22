@@ -131,7 +131,11 @@ def main():
     if not files:
         print(__doc__.strip().split("\n\n")[1], file=sys.stderr)
         return 2
-    path = files[0]
+    # The hints kitten hands over the literal matched text, so a path that was
+    # printed as ~/Documents/x.md arrives with the tilde unexpanded and would
+    # fail as "no such file". Relative matches resolve against the launching
+    # window's cwd, which is the right default.
+    path = os.path.expanduser(files[0])
     if not os.path.exists(path):
         print(f"kiln-md: no such file: {path}", file=sys.stderr)
         return 1
