@@ -181,8 +181,16 @@ weekly epoch stays valid for days after the session that wrote it is gone.
 
 Verified against three independent sources rather than against itself: the
 per-session records on disk, the merge's own output, and `/api/oauth/usage` —
-the endpoint `/usage` reads. At 09:19 on 2026-08-22 all three agreed: five-hour
-1%, weekly 86–87%, Fable 61%.
+the endpoint `/usage` reads. Sampled three times at 45-second intervals on
+2026-08-22, statusline and dashboard agreed exactly and tracked the API.
+
+The weekly figure can sit **one point behind** the API, and that is inherent
+rather than a bug: the payload is the source, and it only advances when a
+session gets an API response. Usage only changes when a session makes a call,
+so the lag closes itself the moment anything happens. The API's own `resets_at`
+is deliberately NOT used as a merge input — it carries sub-second precision and
+drifts by a minute between calls, while the payload's epochs are exact and
+identical across sessions, which is what makes rule 2 above sound.
 
 **A gauge at 1% used to draw as blank**, which is how a correct reading came
 back looking broken the first morning a five-hour window reset while the panel
