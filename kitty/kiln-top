@@ -93,11 +93,25 @@ def spark(h, w, scale=None):
         RAMP[max(1, int(max(0.0, min(1.0, x / top)) * 8 + 0.5))] for x in v)
 
 def gauge(p, w, c=None):
-    if p < 0: return DIM + "─" * w + R
+    """A bar that always has a visible extent when the figure is KNOWN.
+
+    The old version padded the unfilled part with spaces, so 0% and 1% drew as
+    blank — indistinguishable from a broken gauge, and read exactly that way
+    the first morning a five-hour window reset while the panel was open. Now an
+    unknown figure is a dim rule and a known one is a dotted track that the
+    fill eats into, so "measured zero" and "no reading" can never look alike.
+    This is the same rule spark() follows by flooring at RAMP[1].
+    """
+    if p < 0:
+        return DIM + "─" * w + R
     f = max(0.0, min(100.0, p)) / 100.0 * w
     n = int(f)
-    s = "█" * n + (BARS[min(7, int((f - n) * 8))] if n < w and f - n > .06 else "")
-    return (c or heat(p)) + pad(s, w) + R
+    s = "█" * n
+    if n < w and f - n > .06:
+        s += BARS[min(7, int((f - n) * 8))]
+    elif not s and p > 0:
+        s = BARS[0]                       # a real reading, too small to fill a cell
+    return (c or heat(p)) + s + R + DIM + "·" * max(0, w - vlen(s)) + R
 
 def rule(t, w, c=EMBER):
     return f"{c}{B}{t}{R}  {CLAY}" + "─" * max(0, w - len(t) - 4) + R

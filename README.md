@@ -179,6 +179,17 @@ day-old one. Rule 1 is what does the work. Records from sessions that have
 exited are pruned by their own observed-at stamp, not by the window, because a
 weekly epoch stays valid for days after the session that wrote it is gone.
 
+Verified against three independent sources rather than against itself: the
+per-session records on disk, the merge's own output, and `/api/oauth/usage` —
+the endpoint `/usage` reads. At 09:19 on 2026-08-22 all three agreed: five-hour
+1%, weekly 86–87%, Fable 61%.
+
+**A gauge at 1% used to draw as blank**, which is how a correct reading came
+back looking broken the first morning a five-hour window reset while the panel
+was open. An unknown figure is now a dim rule and a known one a dotted track
+the fill eats into, so a measured zero and a missing reading can never render
+alike — the rule `spark()` already followed by flooring at `RAMP[1]`.
+
 The **fable** gauge beside them never had this defect and is unchanged: it is
 not in the payload at all. `usage-refresh.sh` fetches it from the API and
 writes `cache/fablelimit` atomically, at most once a minute across every
