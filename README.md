@@ -157,6 +157,28 @@ cat idles near 1 fps and quickens to roughly 3 fps while Claude works — the
 right way round. Sub-second values are below the schema minimum and are
 silently discarded: no timer at all, 1 render in 20 seconds.
 
+### The plan gauges are merged across sessions
+
+`rate_limits` arrives in the statusline payload, so every open session knows
+the figure — but only as of *its* last API response. These were cached in one
+shared file and the last writer won. With six sessions open, each rendering
+about once a second, the cached pair changed several times a second. Sampled
+2026-08-22 it alternated between four readings, and one of them carried a
+five-hour window that had closed 23 hours earlier: anything reading that file
+showed **61% weekly half the time when the truth was 86%**.
+
+Each session now writes its own record and readers merge them, per field:
+
+1. drop any record whose reset epoch has already passed — that window closed
+2. newest reset epoch wins — a later window is strictly the fresher reading
+3. same epoch, higher percentage wins — usage only climbs within a window
+
+**The percentage alone is not the discriminator.** In that sample the stale
+record read 18% against the live record's 17%, so "take the highest" picks the
+day-old one. Rule 1 is what does the work. Records from sessions that have
+exited are pruned by their own observed-at stamp, not by the window, because a
+weekly epoch stays valid for days after the session that wrote it is gone.
+
 ### The cat
 
 | idle — 1 render a second | working — ~3 a second |
@@ -191,8 +213,24 @@ second one. `q` closes it. `cmd+shift+u` opens btop in the same way for deep
 process work.
 
 ![The dashboard: CPU with per-core bars, GPU, memory breakdown, the process
-table by CPU and by memory, tokens per minute, plan gauges, running agents and
-live Claude sessions](docs/media/09-activity.png)
+table by CPU and by memory, tokens per minute, plan gauges, agent runs with the
+checkout each worked in, all-time totals per agent, and live Claude sessions
+with what each has spent](docs/media/09-activity.png)
+
+Four panels answer four different questions:
+
+* **AGENT RUNS** — every subagent of the last 24 hours: its type, the checkout
+  it worked in (a worktree is marked `wt`, because an agent in one cannot see
+  uncommitted work in the other), model, wall-clock duration, the context it
+  reached, output tokens, and how long ago it last spoke. A green dot means it
+  is still running.
+* **AGENT TOTALS** — all time, per agent type: runs, hours under it, output
+  tokens, turns, last run. Those hours overlap each other and the day; this is
+  time under an agent, not billed time.
+* **CLAUDE SESSIONS** — each live session's own output tokens **and** its
+  agents' separately, because they are different transcripts and adding them is
+  what that session put on the plan.
+* **TOKENS** — output per minute, and the plan gauges.
 
 **A tab, not an overlay, and that was measured.** Driven against a staged kitty
 running a full-screen TUI, the overlay covered the pane completely: the TUI kept

@@ -122,7 +122,7 @@ set -uo pipefail
 
 TOGGLES="$HOME/.claude/feature-toggles.json"
 CACHE="$HOME/.claude/cache"
-RL_CACHE="$CACHE/ratelimits"
+RL_DIR="$CACHE/ratelimits.d"   # one record per session; see the merge below
 GIT_TTL=4          # seconds; git status on a big repo is the only slow call left
 
 # ── stage geometry ───────────────────────────────────────────────────────────
@@ -264,23 +264,64 @@ case "$cols" in ''|*[!0-9]*) cols=0 ;; esac
 case "$cols" in ''|*[!0-9]*) cols=120 ;; esac
 [ "$cols" -lt 20 ] && cols=120
 
-# ── rate-limit cache: only for the first render of a fresh session ───────────
+# ── rate-limit cache: one record per session, merged on read ─────────────────
 # rate_limits is "only present for subscribers after first API response", so a
 # brand-new session has none; this holds the last known pair so it shows real
 # figures immediately instead of two dashes. Builtins only, no jq, no forks.
 #
+# ONE FILE PER SESSION. A single shared file meant last-writer-wins, and every
+# open session rewrites this about once a second. Measured 2026-08-22 with six
+# sessions open: the shared file alternated several times a second between
+# "18 1787314200 61 …" and "17 1787400600 86 …", and the first of those was a
+# day stale — its five-hour window had closed 23 hours earlier. Anything
+# reading the file saw 61% weekly half the time when the truth was 86%.
+#
+# MERGE RULE, applied per field, in this order:
+#   1. drop any record whose reset epoch has already passed; that window closed
+#   2. newest reset epoch wins — a later window is strictly the fresher reading
+#   3. same epoch, higher percentage wins — usage only climbs within a window
+# The percentage alone is NOT the discriminator. In the sample above the stale
+# record read 18% against the live record's 17%, so "take the highest" picks
+# the wrong one.
+#
 # MERGED PER FIELD, not wholesale: five_hour and seven_day are INDEPENDENTLY
 # optional, so a payload can carry one and not the other, and overwriting on
-# either present would clobber a known-good value with -1.
+# either present would clobber a known-good value with -1. That is why this
+# session's own previous record is folded in BEFORE the write.
+now_s="${EPOCHSECONDS:-0}"
 c1=-1; c2=0; c3=-1; c4=0
-{ read -r c1 c2 c3 c4 < "$RL_CACHE"; } 2>/dev/null || true
+{ read -r c1 c2 c3 c4 _ < "$RL_DIR/${sid:-unknown}"; } 2>/dev/null || true
 case "$c1$c2$c3$c4" in ''|*[!0-9\ -]*) c1=-1; c2=0; c3=-1; c4=0 ;; esac
 [ "$blk_pct" -ge 0 ] 2>/dev/null || { blk_pct="$c1"; blk_end="$c2"; }
 [ "$wk_pct"  -ge 0 ] 2>/dev/null || { wk_pct="$c3";  wk_end="$c4";  }
 if [ "$blk_pct" -ge 0 ] 2>/dev/null || [ "$wk_pct" -ge 0 ] 2>/dev/null; then
-  { printf '%s %s %s %s\n' "$blk_pct" "$blk_end" "$wk_pct" "$wk_end" \
-      > "$RL_CACHE"; } 2>/dev/null || true
+  [ -d "$RL_DIR" ] || mkdir -p "$RL_DIR" 2>/dev/null
+  { printf '%s %s %s %s %s\n' "$blk_pct" "$blk_end" "$wk_pct" "$wk_end" "$now_s" \
+      > "$RL_DIR/${sid:-unknown}"; } 2>/dev/null || true
 fi
+# The merge. Every record, including the one just written, so a session whose
+# own window has expired stops showing its own stale figure.
+m1=-1; m2=0; m3=-1; m4=0
+for _rl in "$RL_DIR"/*; do
+  [ -f "$_rl" ] || continue
+  r1=-1; r2=0; r3=-1; r4=0
+  { read -r r1 r2 r3 r4 _ < "$_rl"; } 2>/dev/null || continue
+  case "$r1$r2$r3$r4" in ''|*[!0-9\ -]*) continue ;; esac
+  if [ "$r1" -ge 0 ] 2>/dev/null && [ "$r2" -gt "$now_s" ] 2>/dev/null; then
+    if [ "$r2" -gt "$m2" ] 2>/dev/null ||
+       { [ "$r2" -eq "$m2" ] && [ "$r1" -gt "$m1" ]; } 2>/dev/null; then
+      m1="$r1"; m2="$r2"
+    fi
+  fi
+  if [ "$r3" -ge 0 ] 2>/dev/null && [ "$r4" -gt "$now_s" ] 2>/dev/null; then
+    if [ "$r4" -gt "$m4" ] 2>/dev/null ||
+       { [ "$r4" -eq "$m4" ] && [ "$r3" -gt "$m3" ]; } 2>/dev/null; then
+      m3="$r3"; m4="$r4"
+    fi
+  fi
+done
+[ "$m1" -ge 0 ] 2>/dev/null && { blk_pct="$m1"; blk_end="$m2"; }
+[ "$m3" -ge 0 ] 2>/dev/null && { wk_pct="$m3";  wk_end="$m4";  }
 
 # ── model short name ─────────────────────────────────────────────────────────
 # Most-specific first; the generic *opus*/*sonnet* fallbacks LAST so a new

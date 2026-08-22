@@ -322,3 +322,160 @@ def token_minutes(window_s=1800, tail=262144):
                 continue
             buckets[int(t // 60)] = buckets.get(int(t // 60), 0) + int(ot.group(1))
     return _tok_buckets
+
+
+# ── the agent index ──────────────────────────────────────────────────────────
+# Every subagent Claude Code has ever run leaves a transcript at
+#   ~/.claude/projects/<encoded-cwd>/<session>/subagents/agent-<id>.jsonl
+# and each one carries what the dashboard wants: `attributionAgent` is the
+# agent TYPE (labrat, picasso, stig…), `cwd` and `gitBranch` say which checkout
+# it worked in, the first and last `timestamp` bound its run, and every
+# assistant line carries `message.usage`.
+#
+# COST, measured 2026-08-22: 1,345 transcripts, 2.9 GB, 11.3 s to read them
+# all. That is a background thread and a cached index, never a frame. After
+# the first build each refresh reads only bytes APPENDED since last time — the
+# same offset trick token_minutes uses — so steady state is a few kilobytes.
+#
+# OUTPUT TOKENS ARE COUNTED FROM `message.usage`, NEVER BY REGEX. A regex for
+# `"output_tokens":(\d+)` over the raw bytes reports 169.9M against the true
+# 80.9M, because a tool result that quotes another transcript carries the
+# string too: 80 lines of a single 267-line agent log hold more than one
+# occurrence. Cheap and wrong.
+#
+# Input tokens are NOT summed. Each request re-sends the conversation, so a sum
+# counts the same cached prefix once per turn; the last value is the context
+# the agent actually reached, which is the meaningful figure.
+
+_AI_PATH = os.path.expanduser("~/.claude/cache/kiln-agentindex.json")
+_AI_GLOB = (os.path.expanduser("~/.claude/projects/*/*/subagents/agent-*.jsonl"),
+            os.path.expanduser("~/.claude/projects/*/*.jsonl"))
+_ai = {"recs": {}, "loaded": False, "worker": None, "done": 0, "total": 0,
+       "dirty": False, "saved": 0.0}
+
+
+def _ai_parse(data, r):
+    """Fold newly appended bytes of one transcript into its record."""
+    import json
+    for line in data.splitlines():
+        if b'"timestamp"' not in line:
+            continue
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        ts = d.get("timestamp") or ""
+        if ts:
+            if not r.get("t0"):
+                r["t0"] = ts
+            r["t1"] = ts
+        if not r.get("cwd"):
+            r["cwd"] = d.get("cwd") or ""
+            r["branch"] = d.get("gitBranch") or ""
+            r["slug"] = d.get("slug") or ""
+        if d.get("attributionAgent"):
+            r["type"] = d["attributionAgent"]
+        if d.get("effort"):
+            r["effort"] = d["effort"]
+        m = d.get("message")
+        if not isinstance(m, dict):
+            continue
+        if m.get("model") and not m["model"].startswith("<"):
+            # `<synthetic>` marks a message Claude Code generated locally, with
+            # no model behind it. Letting it win makes an agent look like it
+            # ran on a model that does not exist.
+            r["model"] = m["model"]
+        u = m.get("usage")
+        if isinstance(u, dict):
+            r["out"] = r.get("out", 0) + u.get("output_tokens", 0)
+            r["turns"] = r.get("turns", 0) + 1
+            r["ctx"] = (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
+                        + u.get("cache_creation_input_tokens", 0))
+    return r
+
+
+def _ai_refresh():
+    """Bring the index up to date. Runs on a worker thread, never a frame."""
+    import glob
+    import json
+    paths = [q for g in _AI_GLOB for q in glob.glob(g)]
+    recs = _ai["recs"]
+    _ai["total"] = len(paths)
+    _ai["done"] = 0
+    changed = 0
+    for p in paths:
+        _ai["done"] += 1
+        try:
+            st = os.stat(p)
+        except OSError:
+            continue
+        r = recs.get(p)
+        if r is not None and st.st_size == r.get("off") and st.st_mtime == r.get("mt"):
+            continue
+        if r is None or st.st_size < r.get("off", 0):
+            r = {"off": 0}                       # new, or truncated and rewritten
+        try:
+            with open(p, "rb") as f:
+                f.seek(r["off"])
+                data = f.read()
+                r["off"] = f.tell()
+        except OSError:
+            continue
+        r["mt"] = st.st_mtime
+        # Identity comes from the PATH, which is the only place it is stated:
+        #   .../projects/<enc-cwd>/<session>.jsonl                  a session
+        #   .../projects/<enc-cwd>/<session>/subagents/agent-*.jsonl  one agent
+        parts = p.split(os.sep)
+        if parts[-2] == "subagents":
+            r["kind"] = "agent"
+            r["sid"] = parts[-3]
+        else:
+            r["kind"] = "session"
+            r["sid"] = parts[-1][:-6]
+        _ai_parse(data, r)
+        recs[p] = r
+        changed += 1
+    for p in [p for p in recs if p not in set(paths)]:
+        del recs[p]
+    _ai["loaded"] = True
+    if changed:
+        _ai["dirty"] = True
+    now = time.time()
+    if _ai["dirty"] and now - _ai["saved"] > 30:
+        try:
+            tmp = _AI_PATH + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(recs, f, separators=(",", ":"))
+            os.replace(tmp, _AI_PATH)
+            _ai["dirty"] = False
+            _ai["saved"] = now
+        except Exception:
+            pass
+
+
+def agent_index():
+    """(records, status) — never blocks.
+
+    status is ("ready", n) once the index covers every transcript, and
+    ("indexing", done, total) while the first build is still running. The two
+    must render differently: a zero that means "not indexed yet" and a zero
+    that means "no agent ever ran" look identical otherwise, which is the same
+    trap as a sparkline drawing a measured zero as a blank cell.
+    """
+    import json
+    import threading
+    if not _ai["loaded"] and _ai["worker"] is None:
+        try:
+            with open(_AI_PATH) as f:
+                _ai["recs"] = json.load(f)
+        except Exception:
+            _ai["recs"] = {}
+    w = _ai["worker"]
+    if w is None or not w.is_alive():
+        w = threading.Thread(target=_ai_refresh, daemon=True)
+        _ai["worker"] = w
+        w.start()
+    recs = dict(_ai["recs"])
+    if _ai["loaded"]:
+        return recs, ("ready", len(recs))
+    return recs, ("indexing", _ai["done"], _ai["total"])
